@@ -1,10 +1,5 @@
-﻿using BepInEx;
-using HarmonyLib;
-using Newtonsoft.Json.Linq;
-using pworld.Scripts.Extensions;
-using System;
 using System.Collections.Generic;
-using System.Drawing;
+using System.Linq;
 using TMPro;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -14,103 +9,89 @@ namespace PeakRace.Patch;
 
 public class TimerUI : MonoBehaviour
 {
-    private int leaderboardPosX = 23;
-    private int leaderboardPosY = -60;
-    private int troopPosX = 270;
-    private int troopPosY = 10;
-    private int clockPosX = 20;
-    private int clockPosY = 5;
+    private readonly int leaderboardPosX = 23;
+    private readonly int leaderboardPosY = -60;
+    private readonly int troopPosX = 270;
+    private readonly int troopPosY = 10;
+    private readonly int clockPosX = 20;
+    private readonly int clockPosY = 5;
     private Canvas canvas;
     private TextMeshProUGUI leaderboard;
     private TextMeshProUGUI troop;
     private TextMeshProUGUI clock;
-    static int shadowMaterialID;
+    private static Material shadowMaterial;
+    private float nextLeaderboardRefresh;
 
-    void Awake()
+    private void Awake()
     {
-        GameObject timerUI = this.gameObject;
-        canvas = timerUI.AddComponent<Canvas>();
+        canvas = gameObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
 
-        CanvasScaler scalar = canvas.gameObject.AddComponent<CanvasScaler>();
-        scalar.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scalar.referenceResolution = new Vector2(1920f, 1080f);
+        CanvasScaler scaler = canvas.gameObject.AddComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = new Vector2(1920f, 1080f);
 
-        //Finds the shadow material
-        UnityEngine.Object[] materialList = Resources.FindObjectsOfTypeAll(typeof(Material));
-        foreach (var material in materialList)
+        if (shadowMaterial == null)
         {
-            //Debug.Log($"Found Material: {material.name} ID({material.GetInstanceID()})");
-            if (material.name == "DarumaDropOne-Regular SDF Shadow")
-            {
-                shadowMaterialID = material.GetInstanceID();
-                Debug.Log("[RaceToThePeak] Successfully found Daruma Shadow Material");
-            }
+            shadowMaterial = Resources.FindObjectsOfTypeAll<Material>()
+                .FirstOrDefault(material => material.name == "DarumaDropOne-Regular SDF Shadow");
         }
 
-        //Finds the TMP_Font
         if (Plugin.FontAsset == null)
         {
-            UnityEngine.Object[] fontList = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
-            foreach (TMP_FontAsset font in fontList)
-            {
-                //Debug.Log($"[RaceToThePeak] Found Font: {font.name}");
-                if (font.name.Equals("DarumaDropOne-Regular SDF"))
-                {
-                    Plugin.FontAsset = font;
-                    Debug.Log("[RaceToThePeak] Successfully found Daruma Font");
-                }
-            }
+            Plugin.FontAsset = Resources.FindObjectsOfTypeAll<TMP_FontAsset>()
+                .FirstOrDefault(font => font.name == "DarumaDropOne-Regular SDF");
         }
 
         InitializeUI();
     }
 
-    void InitializeUI()
+    private void InitializeUI()
     {
-        //Configures leaderboard
-        GameObject leaderboardUI = new GameObject("LeaderboardUI");
-        leaderboardUI.transform.SetParent(canvas.transform, worldPositionStays: false);
-        leaderboard = leaderboardUI.AddComponent<TextMeshProUGUI>();
-        Vector3 leaderboardPos = default(Vector3);
-        leaderboardPos.x = leaderboardPosX;
-        leaderboardPos.y = leaderboardPosY;
-        leaderboard.text = "";
-        SetupText(leaderboard, leaderboardPos);
-        leaderboard.font = Plugin.FontAsset;
-        leaderboard.fontMaterial = (Material)Resources.InstanceIDToObject(shadowMaterialID);
-        leaderboard.color = Plugin.Color;
-        leaderboard.fontSize = 18;
+        leaderboard = CreateText(
+            "LeaderboardUI",
+            new Vector3(leaderboardPosX, leaderboardPosY),
+            string.Empty,
+            18,
+            Plugin.Color);
 
-        //Configures Troop
-        GameObject troopUI = new GameObject("TroopUI");
-        troopUI.transform.SetParent(canvas.transform, worldPositionStays: false);
-        troop = troopUI.AddComponent<TextMeshProUGUI>();
-        Vector3 troopPos = default(Vector3);
-        troopPos.x = troopPosX;
-        troopPos.y = troopPosY;
-        troop.text = "Troop Null";
-        troop.color = Plugin.Color;
-        SetupText(troop, troopPos);
-        troop.font = Plugin.FontAsset;
-        troop.fontMaterial = (Material)Resources.InstanceIDToObject(shadowMaterialID);
-        troop.fontSize = 50;
+        troop = CreateText(
+            "TroopUI",
+            new Vector3(troopPosX, troopPosY),
+            "Troop Null",
+            50,
+            Plugin.Color);
 
-        //Configures Timer
-        GameObject clockUI = new GameObject("ClockUI");
-        clockUI.transform.SetParent(canvas.transform, worldPositionStays: false);
-        clock = clockUI.AddComponent<TextMeshProUGUI>();
-        Vector3 clockPos = default(Vector3);
-        clockPos.x = clockPosX;
-        clockPos.y = clockPosY;
-        clock.text = "00:00:00";
-        SetupText(clock, clockPos);
-        clock.font = Plugin.FontAsset;
-        clock.fontMaterial = (Material)Resources.InstanceIDToObject(shadowMaterialID);
-        clock.color = Plugin.Color;
-        clock.fontSize = 46;
+        clock = CreateText(
+            "ClockUI",
+            new Vector3(clockPosX, clockPosY),
+            "00:00:00",
+            46,
+            Plugin.Color);
 
         Debug.Log("[RaceToThePeak] GUI Initialized");
+    }
+
+    private TextMeshProUGUI CreateText(
+        string objectName,
+        Vector3 position,
+        string initialText,
+        float fontSize,
+        Color color)
+    {
+        GameObject textObject = new(objectName);
+        textObject.transform.SetParent(canvas.transform, worldPositionStays: false);
+        TextMeshProUGUI text = textObject.AddComponent<TextMeshProUGUI>();
+        text.text = initialText;
+        text.font = Plugin.FontAsset;
+        if (shadowMaterial != null)
+        {
+            text.fontMaterial = shadowMaterial;
+        }
+        text.color = color;
+        text.fontSize = fontSize;
+        SetupText(text, position);
+        return text;
     }
 
     public static void SetupText(TextMeshProUGUI text, Vector3 anchoredPos)
@@ -128,172 +109,147 @@ public class TimerUI : MonoBehaviour
     {
         if (Character.localCharacter == null)
         {
-            Debug.Log($"[RaceToThePeak] the Local Character has not been loaded yet");
             return;
         }
 
-        CharacterTeamInfo TeamInfo = Character.localCharacter.GetComponent<CharacterTeamInfo>();
-        if (TeamInfo == null)
+        CharacterTeamInfo teamInfo = Character.localCharacter.GetComponent<CharacterTeamInfo>();
+        if (teamInfo == null
+            || teamInfo.teamInt < 0
+            || teamInfo.teamInt >= Plugin.teamList.Count)
         {
-            Debug.Log($"[RaceToThePeak] the {Character.localCharacter.name} CharacterTeamHandler couldnt be found");
             return;
         }
 
-        troop.text = Plugin.teamList[TeamInfo.teamInt].Item1;
-        troop.color = Plugin.teamList[TeamInfo.teamInt].Item2;
-    
-        // Disable/Enable Teams
-        if (leaderboard.enabled != TeamInfo.teamOn)
-        { 
-            leaderboard.enabled = TeamInfo.teamOn;
-            troop.enabled = TeamInfo.teamOn;
-            clock.enabled = TeamInfo.teamOn;
-        }
+        troop.text = Plugin.teamList[teamInfo.teamInt].Item1;
+        troop.color = Plugin.teamList[teamInfo.teamInt].Item2;
 
-        clock.text = TeamInfo.timeString;
-
-        String scene = SceneManager.GetActiveScene().name;
-        if (scene != "Airport" && TeamInfo.teamGUIOn)
+        if (leaderboard.enabled != teamInfo.teamOn)
         {
-            updateScoreboard();
+            leaderboard.enabled = teamInfo.teamOn;
+            troop.enabled = teamInfo.teamOn;
+            clock.enabled = teamInfo.teamOn;
         }
-        
+
+        clock.text = teamInfo.timeString;
+        if (SceneManager.GetActiveScene().name != "Airport"
+            && teamInfo.teamGUIOn
+            && Time.unscaledTime >= nextLeaderboardRefresh)
+        {
+            nextLeaderboardRefresh = Time.unscaledTime + 0.25f;
+            UpdateScoreboard(teamInfo);
+        }
     }
 
-    private void updateScoreboard()
+    private void UpdateScoreboard(CharacterTeamInfo yourTeamInfo)
     {
-        CharacterTeamInfo yourTeamInfo = Character.localCharacter.GetComponent<CharacterTeamInfo>();
-        int yourPlace = 0;
+        List<(int team, float time, float height)> standings = Character.AllCharacters
+            .Where(character => character != null && !character.isBot)
+            .Select(character => character.GetComponent<CharacterTeamInfo>())
+            .Where(teamInfo => teamInfo != null
+                && teamInfo.teamInt >= 0
+                && teamInfo.teamInt < Plugin.teamList.Count)
+            .GroupBy(teamInfo => teamInfo.teamInt)
+            .Select(team => (
+                team: team.Key,
+                time: team.Average(member => member.time),
+                height: team.Average(GetDisplayHeight)))
+            .OrderBy(entry => entry.time)
+            .ThenByDescending(entry => entry.height)
+            .ThenBy(entry => entry.team)
+            .ToList();
 
-        //Initializes 
-        Dictionary<int, List<CharacterTeamInfo>> teamTracker = new Dictionary<int, List<CharacterTeamInfo>>();
-        foreach (Character allChar in Character.AllCharacters)
+        if (standings.Count == 0)
         {
-            CharacterTeamInfo TeamInfo = allChar.GetComponent<CharacterTeamInfo>();
-            if (teamTracker.ContainsKey(TeamInfo.teamInt))
-            {
-                teamTracker[TeamInfo.teamInt].Add(TeamInfo);
-            }
-            else
-            {
-                teamTracker.Add(TeamInfo.teamInt, new List<CharacterTeamInfo>());
-                teamTracker[TeamInfo.teamInt].Add(TeamInfo);
-            }
+            leaderboard.text = string.Empty;
+            return;
         }
 
-        //Loop through teamTracker to calculate total team scores
-        List<(int team, float time)> teamTimer = new List<(int, float)>();
-        foreach (KeyValuePair <int, List<CharacterTeamInfo>> team in teamTracker)
+        int yourIndex = standings.FindIndex(entry => entry.team == yourTeamInfo.teamInt);
+        int visibleCount = Mathf.Min(5, standings.Count);
+        List<string> rows = new();
+
+        if (yourIndex >= 0 && yourIndex < visibleCount)
         {
-            float timer = 0;
-            foreach (CharacterTeamInfo teamHandler in team.Value)
+            for (int index = 0; index < visibleCount; index++)
             {
-                timer += teamHandler.time;
+                rows.Add(FormatStanding(standings[index], index, index == yourIndex));
             }
-            teamTimer.Add((team.Key, timer / team.Value.Count));
         }
-        //Add debug teams here
-        //teamTimer.Add((0, 38.5f));
-        //teamTimer.Add((1, 15));
-        //teamTimer.Add((2, 28.7f));
-        //teamTimer.Add((3, 30));
-        //teamTimer.Add((4, 26.0f));
-        //teamTimer.Add((5, 60));
-
-        // Determines teams placement
-        (int team, float time)[] trophyPlaces = [(-1, 0), (-1, 0), (-1, 0), (-1, 0), (-1, 0), (-1, 0),
-                                                 (-1, 0), (-1, 0), (-1, 0), (-1, 0), (-1, 0), (-1, 0)];
-        int idx = 0;
-        while(teamTimer.Count>0)
+        else if (yourIndex >= 0)
         {
-            //should rewrite to do just a straight insertion sort algorithm
-            int nextPlace = findNextPole(teamTimer); 
-            
-            trophyPlaces[idx].team = teamTimer[nextPlace].team;
-            trophyPlaces[idx].time = teamTimer[nextPlace].time;
-            if (yourTeamInfo.teamInt == teamTimer[nextPlace].team)
+            rows.Add(FormatStanding(standings[0], 0, false));
+            if (standings.Count > 1)
             {
-                yourPlace = idx;
+                rows.Add(FormatStanding(standings[1], 1, false));
             }
-            teamTimer.RemoveAt(nextPlace);
-            idx++;
+            rows.Add("- - - - - - - - - -");
+            rows.Add(FormatStanding(standings[yourIndex - 1], yourIndex - 1, false));
+            rows.Add(FormatStanding(standings[yourIndex], yourIndex, true));
         }
-
-        // If player is top 5, writes top five score
-        string[] teams = ["","","","",""];
-        if(yourPlace<5)
-        {
-            teams[0] = colorizeLeaderboard("1st", trophyPlaces[0].time, Plugin.teamList[trophyPlaces[0].team].Item2 );
-            if (trophyPlaces[1].time > 0)
-                { teams[1] = colorizeLeaderboard("\n2nd", trophyPlaces[1].time, Plugin.teamList[trophyPlaces[1].team].Item2 ); }
-            if (trophyPlaces[2].time > 0)
-                { teams[2] = colorizeLeaderboard("\n3rd", trophyPlaces[2].time, Plugin.teamList[trophyPlaces[2].team].Item2 ); }
-            if (trophyPlaces[3].time > 0)
-                { teams[3] = colorizeLeaderboard("\n4th", trophyPlaces[3].time, Plugin.teamList[trophyPlaces[3].team].Item2 ); }
-            if (trophyPlaces[4].time > 0)
-                { teams[4] = colorizeLeaderboard("\n5th", trophyPlaces[4].time, Plugin.teamList[trophyPlaces[4].team].Item2 ); }
-
-            teams[yourPlace] += " (You)";
-            //Here is where we would calculate team color on leaderboard
-            leaderboard.text = teams[0]+teams[1]+teams[2]+teams[3]+teams[4];
-        }
-        // Otherwise break after 2 and write player position
         else
         {
-            teams[0] = colorizeLeaderboard("1st", trophyPlaces[0].time, Plugin.teamList[trophyPlaces[0].team].Item2 );
-            teams[1] = colorizeLeaderboard("\n2nd", trophyPlaces[1].time, Plugin.teamList[trophyPlaces[1].team].Item2 );
-            teams[2] = "\n- - - - - - - - - -";
-            teams[3] = colorizeLeaderboard($"\n{yourPlace}th", trophyPlaces[yourPlace-1].time, Plugin.teamList[trophyPlaces[yourPlace-1].team].Item2);
-            teams[4] = colorizeLeaderboard($"\n{yourPlace + 1}th", trophyPlaces[yourPlace].time, Plugin.teamList[trophyPlaces[yourPlace].team].Item2) + " (You)";
-
-            //Here is where we would calculate team color on leaderboard
-            leaderboard.text = teams[0] + teams[1] + teams[2] + teams[3] + teams[4];
-        }
-
-    }
-
-    //Colorize Leaderboard
-    private string colorizeLeaderboard(string place, float time, UnityEngine.Color color)
-    {
-        string colorText = ColorUtility.ToHtmlStringRGBA(color);
-        string boardText = $"<color=#{colorText}>{place} {timeToString(time)}</color>";
-        return boardText;
-    }
-
-    // Calculates the next pole position
-    private int findNextPole(List<(int team, float time)> teamTimer)
-    {
-        int scoreIdx = 0;
-        float lowestScore = teamTimer[0].time;
-        for (int i = 1; i < teamTimer.Count; i++)
-        {
-            if(teamTimer[i].time< lowestScore)
+            for (int index = 0; index < visibleCount; index++)
             {
-                scoreIdx = i;
-                lowestScore = teamTimer[i].time;
+                rows.Add(FormatStanding(standings[index], index, false));
             }
         }
-        return scoreIdx;
+
+        leaderboard.text = string.Join("\n", rows);
     }
 
-    // Converts float to timer string
-    private string timeToString(float time)
+    private static float GetDisplayHeight(CharacterTeamInfo teamInfo)
     {
-        int hourTime = (int)(time / 3600);
-        int minTime = (int)(time % 3600 / 60);
-        int secTime = (int)(time % 60);
-
-        return $"{needZero(hourTime)}:{needZero(minTime)}:{needZero(secTime)}";
-    }
-
-    // Determines whether string needs extra 0 for timer format
-    private string needZero(int time)
-    {
-        if (time / 10 < 1)
+        Character character = teamInfo.myChar;
+        if (character == null)
         {
-            return $"0{time}";
+            return 0f;
         }
-        return $"{time}";
+
+        float units = character.data != null && character.data.dead
+            ? character.LastLivingPosition.y
+            : character.HipPos().y;
+        return Mathf.Max(0f, CharacterStats.UnitsToMeters(units));
     }
 
+    private string FormatStanding(
+        (int team, float time, float height) standing,
+        int zeroBasedPlace,
+        bool isYourTeam)
+    {
+        Color color = Plugin.teamList[standing.team].Item2;
+        string colorText = ColorUtility.ToHtmlStringRGBA(color);
+        string row = $"<color=#{colorText}>{Ordinal(zeroBasedPlace + 1)} "
+            + $"{TimeToString(standing.time)} • {Mathf.RoundToInt(standing.height)}m</color>";
+        return isYourTeam ? row + " (You)" : row;
+    }
+
+    private static string Ordinal(int place)
+    {
+        int lastTwo = place % 100;
+        if (lastTwo is >= 11 and <= 13)
+        {
+            return $"{place}th";
+        }
+
+        return (place % 10) switch
+        {
+            1 => $"{place}st",
+            2 => $"{place}nd",
+            3 => $"{place}rd",
+            _ => $"{place}th"
+        };
+    }
+
+    private static string TimeToString(float time)
+    {
+        int hours = (int)(time / 3600);
+        int minutes = (int)(time % 3600 / 60);
+        int seconds = (int)(time % 60);
+        return $"{WithLeadingZero(hours)}:{WithLeadingZero(minutes)}:{WithLeadingZero(seconds)}";
+    }
+
+    private static string WithLeadingZero(int time)
+    {
+        return time < 10 ? $"0{time}" : time.ToString();
+    }
 }

@@ -1,17 +1,11 @@
 ﻿using HarmonyLib;
 using Photon.Pun;
-using System;
+using PeakRace.Core;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Globalization;
 using System.Linq;
-using System.Text;
-using TMPro;
 using UnityEngine;
-using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
-using UnityEngine.SocialPlatforms.Impl;
-using UnityEngine.TextCore.Text;
+using Zorro.Core;
 
 namespace PeakRace.Patch;
 
@@ -25,9 +19,8 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
     public float time;
     public string timeString;
     public float checkpointRadius;
-    private GameObject GameMap;
-    private GameObject EndFlag;
     private List<Campfire> campfireList;
+    private bool checkpointsInitialized;
     public Character myChar;
 
     [HarmonyPatch(typeof(Character), nameof(Character.Awake))]
@@ -38,36 +31,17 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
         Debug.Log($"[RaceToThePeak] TeamInfo Object Created for {__instance.name}");
     }
 
-    // Adds 5 minutes to player death timer
+    // Scout flags resolve through TryCheckpoint before RPCA_Die is ever sent.
+    // Consequently a successful flag revive reaches neither this penalty nor
+    // the custom respawn controller.
     [HarmonyPatch(typeof(Character), nameof(Character.RPCA_Die))]
     [HarmonyPostfix]
     private static void deathTimer(Character __instance)
     {
         CharacterTeamInfo teamHandler = __instance.GetComponent<CharacterTeamInfo>();
-        teamHandler.time += 300;
-
-        // Need to count alive and climbing players
-        int aliveCount = 0;
-        int climbingCount = 0;
-        foreach (Character character in Character.AllCharacters)
+        if (teamHandler != null)
         {
-            if (!character.data.dead)
-            {
-                aliveCount++;
-                if (character.GetComponent<CharacterTeamInfo>().timeOn)
-                {
-                    climbingCount++;
-                }
-            }
-        }
-
-        // if all alive players are done climbing respawn dead players
-        if (climbingCount == 0 && aliveCount > 0)
-        {
-            Campfire spawnCamp = teamHandler.campfireList[0];
-            teamHandler.timeOn = false;
-            //Debug.Log($"[RaceToThePeak] Respawning all players due to last climber dying");
-            //respawnPlayers(spawnCamp);
+            teamHandler.time += RaceSettingsManager.Current.ActivePenaltySeconds;
         }
     }
 
@@ -102,11 +76,8 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
         //Initializes Campfire Checkpoints
         if (scene != "Airport")
         {
-            GameMap = GameObject.Find("Map");
-            campfireList = GameMap.GetComponentsInChildren<Campfire>(true).Cast<Campfire>().ToList();
-            //Removes spawn campfire
-            campfireList.RemoveAt(0);
-            EndFlag = GameObject.Find("Map/Biome_4/Volcano/Peak/Flag_planted_seagull");
+            campfireList = new List<Campfire>();
+            InitializeCheckpoints();
         }
 
         //Debug.Log("[RaceToThePeak] TeamInfo Initialized");
@@ -120,45 +91,7 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
 
     private void FixedUpdate()
     {
-
-        String scene = SceneManager.GetActiveScene().name;
-        
-        //if (scene == "Airport")
-        //{
-        //    if (Keyboard.current.pKey.wasPressedThisFrame)
-        //    {
-        //        Debug.Log("[RaceToThePeak] p key pressed");
-        //        teamInt++;
-        //        if (teamInt > 11)
-        //        { teamInt = 0; }
-        //        //Called to update Armband
-        //        changeTeam(teamInt);
-        //        //PlayerPrefs.SetInt("Team", teamInt);
-        //    }
-        //}
-        //
-        //// Start/Stop timer
-        //if (Keyboard.current.iKey.wasPressedThisFrame)
-        //{
-        //    Debug.Log("[RaceToThePeak] i key pressed");
-        //    timeOn = !timeOn;
-        //    //Debug.Log($"[RaceToThePeak] timeOn:{timeOn} \n update Speed: {Time.fixedDeltaTime}");
-        //}
-        //
-        //// Disable/Enable Teams
-        //if (Keyboard.current.oKey.wasPressedThisFrame)
-        //{
-        //    Debug.Log("[RaceToThePeak] o key pressed");
-        //    teamOn = !teamOn;
-        //    teamGUIOn = !teamGUIOn;
-        //}
-        //
-        //// Reset Timer
-        //if (Keyboard.current.rKey.wasPressedThisFrame)
-        //{
-        //    Debug.Log("[RaceToThePeak] r key pressed");
-        //    resetTimer();
-        //}
+        string scene = SceneManager.GetActiveScene().name;
 
         if (timeOn)
         {
@@ -192,31 +125,47 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
         return $"{time}";
     }
 
-    private void resetTimer()
-    {
-        time = 0;
-    }
-
     private void checkpointHandler()
     {
+        if (!checkpointsInitialized)
+        {
+            InitializeCheckpoints();
+        }
+
+        if (!checkpointsInitialized || campfireList == null)
+        {
+            return;
+        }
+
         // Checks if in range of one of the campfires
         int idx = 0;
         foreach (Campfire campfire in campfireList)
         {
+            if (campfire == null)
+            {
+                campfireList.RemoveAt(idx);
+                return;
+            }
+
             if (Vector3.Distance(campfire.transform.position, myChar.Center) <= checkpointRadius)
             {
                 campfireList.RemoveAt(idx);
-                timeOn = false;
-                idx--;
-                Debug.Log($"[RaceToThePeak] Timer was turned off for {myChar.name} due to campfire");
-    //            respawnPlayers(campfire);
+                // A racer arriving after somebody else advanced must keep timing.
+                // Only pause while this racer still has to activate an unlit fire.
+                if (!campfire.Lit)
+                {
+                    timeOn = false;
+                    Debug.Log($"[RaceToThePeak] Timer was paused for {myChar.name} at an unlit campfire");
+                }
                 return;
             }
             idx++;
         }
     
-        // Checks if in range of the end flag
-        if (Vector3.Distance(EndFlag.transform.position, myChar.Center) <= checkpointRadius)
+        // PEAK 2.x uses generated/variant biomes, so a hard-coded flag path is
+        // not stable. Ask the game's progress handler whether this is the peak.
+        MountainProgressHandler progressHandler = Singleton<MountainProgressHandler>.Instance;
+        if (progressHandler != null && progressHandler.IsAtPeak(myChar.Center))
         {
             timeOn = false;
             Debug.Log($"[RaceToThePeak] Timer was turned off for {myChar.name} due to reaching the PEAK");
@@ -224,53 +173,18 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
         }
     }
 
-    [HarmonyPatch(typeof(Campfire), nameof(Campfire.Interact_CastFinished))]
-    [HarmonyPrefix]
-    private static void RespawnAll (Character interactor, Campfire __instance)
+    private void InitializeCheckpoints()
     {
-        foreach (Character character in Character.AllCharacters)
+        if (!MapHandler.Exists)
         {
-            if (character == interactor)
-            {
-                Debug.Log($"[RaceToThePeak] {character.name} is respawning all players at {__instance.advanceToSegment}");
-                respawnPlayers(__instance);
-            }
-        }
-    }
-
-    // Checks if its time to respawn all players by the fire
-    private static void respawnPlayers(Campfire campfire)
-    {
-        //Find the amount of dead players, so you know how much to space them
-        int deadCount = 0;
-        foreach (Character character in Character.AllCharacters)
-        {
-            if (character.data.dead || character.data.fullyPassedOut)
-            {
- 
-                deadCount++;
-            }
+            return;
         }
 
-        // Respawn equally spaced players
-        int playerIdx = 0;
-        foreach (Character character in Character.AllCharacters)
-        {
-            if (character.data.dead || character.data.fullyPassedOut)
-            {
-                double angle = playerIdx * ( Math.PI / deadCount ) ;
-                double xAdj = Math.Sin(angle) *3;
-                double zAdj = Math.Cos(angle) *3;
-                Vector3 adjustLocation = new Vector3((float)xAdj, 5f, (float)xAdj);
-                //respawn them around the campfire
-                //character.GetComponent<CharacterTeamInfo>().campfireList.Remove(campfire);
-                //character.GetComponent<CharacterTeamInfo>().timeOn = false;
-                character.photonView.RPC("RPCA_ReviveAtPosition", RpcTarget.All, campfire.transform.position + adjustLocation, true);
-                playerIdx++;
-            }
-        }
-        //}
-
+        campfireList = Singleton<MapHandler>.Instance
+            .GetComponentsInChildren<Campfire>(true)
+            .Where(campfire => campfire != null && campfire.advanceToSegment != Segment.Beach)
+            .ToList();
+        checkpointsInitialized = true;
     }
 
     // sends new team data to all clients

@@ -12,10 +12,10 @@ websiteUrl = "https://github.com/Raiderj9/RaceToThePEAK"
 containsNsfwContent = false
 
 [package.dependencies]
-BepInEx-BepInExPack_PEAK = "5.4.2403"
+BepInEx-BepInExPack_PEAK = "5.4.75301"
 
 [build]
-icon = "../../icon.png"
+icon = "../../Icon.png"
 readme = "../../README.md"
 outdir = "../../artifacts/thunderstore/"
 

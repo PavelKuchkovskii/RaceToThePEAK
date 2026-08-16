@@ -7,7 +7,6 @@ namespace PeakRace.Patch;
 [HarmonyPatch]
 internal class Armband : MonoBehaviour
 {
-    Rigidbody arm;
     int teamInt = 1;
     public Character myChar;
     public GameObject myArmband;

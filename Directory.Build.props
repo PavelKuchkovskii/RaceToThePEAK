@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <SolutionRoot>$(MSBuildThisFileDirectory)</SolutionRoot>
+    <LangVersion>latest</LangVersion>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>embedded</DebugType>
+    <PathBeforeSteam Condition="'$([MSBuild]::IsOSUnixLike())' == 'true'">$(HOME)/.local/share/</PathBeforeSteam>
+    <PathBeforeSteam Condition="'$([MSBuild]::IsOSUnixLike())' != 'true'">$(MSBuildProgramFiles32)/</PathBeforeSteam>
+    <PeakGameRootDir Condition="'$(PeakGameRootDir)' == ''">$(PathBeforeSteam)Steam/steamapps/common/PEAK/</PeakGameRootDir>
+    <ManagedDir>$(PeakGameRootDir)/PEAK_Data/Managed/</ManagedDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PathMap>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)'))=./</PathMap>
+  </PropertyGroup>
+</Project>
