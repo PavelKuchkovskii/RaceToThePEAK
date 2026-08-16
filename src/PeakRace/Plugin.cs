@@ -1,4 +1,5 @@
 ﻿using BepInEx;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 using PeakRace.Core;
@@ -29,21 +30,21 @@ public partial class Plugin : BaseUnityPlugin
     private GameObject runControlMenuObject;
     private RaceSettingsMenu settingsMenu;
     private RunControlMenu runControlMenu;
+    private static ConfigEntry<Key> menuKeyConfig;
 
-    internal static bool ShouldReserveF2
-    {
-        get
-        {
-            string scene = SceneManager.GetActiveScene().name;
-            bool isHost = !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
-            return scene != "Title" && isHost;
-        }
-    }
+    internal static string MenuKeyDisplayName => menuKeyConfig?.Value.ToString() ?? Key.F3.ToString();
 
     private void Awake()
     {
         Log = base.Logger;
         Log.LogInfo("Plugin RaceToThePeak Loaded");
+
+        menuKeyConfig = Config.Bind(
+            "UI",
+            "MenuKey",
+            Key.F3,
+            "Key used by the host to open RaceToThePeak lobby settings and in-run controls. "
+            + "F3 is intentionally separate from PEAK Unlimited's default F2 menu.");
 
         systemsObject = new GameObject("RaceToThePeakSystems");
         DontDestroyOnLoad(systemsObject);
@@ -65,7 +66,6 @@ public partial class Plugin : BaseUnityPlugin
         DontDestroyOnLoad(runControlMenuObject);
         runControlMenu = runControlMenuObject.AddComponent<RunControlMenu>();
 
-        PeakUnlimitedCompatibility.Apply(harmony);
         SceneManager.sceneLoaded += OnSceneLoaded;
 
         // Sets up team Names and colors
@@ -140,11 +140,7 @@ public partial class Plugin : BaseUnityPlugin
 
         bool inLobby = SceneManager.GetActiveScene().name == "Airport";
         bool isHost = !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
-        bool f2Pressed = Keyboard.current != null && Keyboard.current.f2Key.wasPressedThisFrame;
-        if (f2Pressed && ShouldReserveF2)
-        {
-            PeakUnlimitedCompatibility.CloseConfigurationMenu();
-        }
+        bool menuKeyPressed = MenuKeyWasPressedThisFrame();
 
         if (!isHost)
         {
@@ -156,7 +152,7 @@ public partial class Plugin : BaseUnityPlugin
         if (inLobby)
         {
             runControlMenu.CloseMenu();
-            if (f2Pressed)
+            if (menuKeyPressed)
             {
                 settingsMenu.ToggleMenu();
             }
@@ -170,17 +166,24 @@ public partial class Plugin : BaseUnityPlugin
             return;
         }
 
-        if (f2Pressed)
+        if (menuKeyPressed)
         {
             runControlMenu.ToggleMenu();
         }
+    }
+
+    private static bool MenuKeyWasPressedThisFrame()
+    {
+        Key configuredKey = menuKeyConfig?.Value ?? Key.F3;
+        return configuredKey != Key.None
+            && Keyboard.current != null
+            && Keyboard.current[configuredKey].wasPressedThisFrame;
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         settingsMenu?.CloseMenu();
         runControlMenu?.CloseMenu();
-        PeakUnlimitedCompatibility.CloseConfigurationMenu();
     }
 
     private void OnDestroy()

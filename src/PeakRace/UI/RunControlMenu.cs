@@ -185,7 +185,7 @@ internal sealed class RunControlMenu : MenuWindow
         endRequested = true;
         Character hostCharacter = Character.localCharacter;
         CloseMenu();
-        Plugin.Log.LogInfo("The host ended the current run from the F2 race controls panel.");
+        Plugin.Log.LogInfo("The host ended the current run from the race controls panel.");
 
         // This bypasses CheckEndGame (which self-respawn modes intentionally
         // suppress) but keeps PEAK's complete networked results/return flow.

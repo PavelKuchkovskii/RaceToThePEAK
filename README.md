@@ -16,22 +16,22 @@ through climbing prowess, or resort to sabotage to be the fastest up the PEAK.
 - Sun, sky, storms and Gloom visuals follow each client's observed racer, so unlocking a later biome does not obscure earlier racers' routes.
 - Final rising lava or Gloom starts separately when each racer enters the final biome. Its timer is synchronized for spectating and does not reset after death.
 - Previous-campfire respawns use the furthest lit camp personally reached by that racer, never the leader's global map progress.
-- Four host-configurable respawn modes, available from the Airport with **F2**.
+- Four host-configurable respawn modes, available from the Airport with **F3** by default.
 - Respawn statues always give items instead of reviving players.
 - Scoutmaster spawning is disabled.
 - Compatible with PEAK Unlimited and arbitrary lobby sizes.
 
 ## Respawn settings
-The lobby host can press **F2** in the Airport to configure and synchronize the race rules:
+The lobby host can press **F3** in the Airport to configure and synchronize the race rules:
 
 1. **Next campfire**: add a configurable penalty (default **5 minutes**) and revive when the next campfire is activated.
 2. **Timed at corpse**: add a configurable penalty (default **5 minutes**) and revive at the player's own corpse after a configurable delay (default **30 seconds**). A compact team-colored countdown is shown to the dead player and their teammates.
 3. **Previous campfire**: immediately revive at the previous campfire with a configurable penalty (default **0 minutes**).
 4. **PVP**: adds a crimson PVP blowgun with a matching inventory icon to ordinary luggage with a **50% drop chance**. Real deaths have their own lobby-selectable respawn strategy: previous campfire, timed at the corpse, or next activated campfire. If the special blowgun causes a scout to pass out, their pocket items drop and they are always sent immediately to the previous campfire without waiting to become bones, independently of the real-death setting. The normal blowgun and all other pass-out causes keep vanilla behavior. Optionally, every opened luggage chest can close and roll new loot after a host-configurable delay (default **5 minutes**).
 
-Settings are locked after the race leaves the Airport. Only the lobby host can open the F2 panel; guests receive the room's active settings silently. RaceToThePeak reserves **F2** so PEAK Unlimited cannot open a second input-blocking window from the same key press. To keep PEAK Unlimited's settings menu available, assign it another key such as `<Keyboard>/f3` in `BepInEx/config/PEAKUnlimited.cfg`; its gameplay features are unaffected.
+Settings are locked after the race leaves the Airport. Only the lobby host can open the RaceToThePeak panel; guests receive the room's active settings silently. Its key is independently configurable as `UI.MenuKey` in RaceToThePeak's BepInEx config and defaults to **F3**, leaving PEAK Unlimited's **F2** menu completely untouched.
 
-During a run, **F2** opens a separate host-only race controls panel in every respawn mode. Its confirmed **End current run** action uses PEAK's normal networked results flow, allowing an unfinished run to end in defeat and the existing room to return to the Airport without recreating the lobby. Guests cannot open or use this panel.
+During a run, the same configured key (**F3** by default) opens a separate host-only race controls panel in every respawn mode. Its confirmed **End current run** action uses PEAK's normal networked results flow, allowing an unfinished run to end in defeat and the existing room to return to the Airport without recreating the lobby. Guests cannot open or use this panel.
 
 ## Notes
 Things to be aware of while using this mod:

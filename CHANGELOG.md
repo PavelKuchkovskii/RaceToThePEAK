@@ -1,3 +1,8 @@
+### 0.8.5
+* Moved RaceToThePeak's host lobby and in-run panels to an independent configurable key, defaulting to F3.
+* Removed the Harmony interception and forced closing of PEAK Unlimited's configuration window; PEAK Unlimited retains full ownership of its F2 binding.
+* Panel hints now display the currently configured RaceToThePeak menu key.
+
 ### 0.8.4
 * Previous-campfire respawns and PVP blowgun knockouts now use each victim's personal climbing progress instead of the lobby's furthest unlocked segment.
 * Each actor's furthest personally reached lit campfire is synchronized through Photon room properties and survives falling back, death and host migration.

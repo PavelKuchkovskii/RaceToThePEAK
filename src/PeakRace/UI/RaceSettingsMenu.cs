@@ -4,7 +4,7 @@ using UnityEngine;
 namespace PeakRace.UI;
 
 /// <summary>
-/// Compact host settings panel opened by F2 in the Airport.
+/// Compact host settings panel opened by the configured menu key in the Airport.
 /// </summary>
 internal sealed class RaceSettingsMenu : MenuWindow
 {
@@ -185,8 +185,8 @@ internal sealed class RaceSettingsMenu : MenuWindow
         GUI.enabled = true;
 
         string hint = manager.CanEditLobbySettings
-            ? "F2: close • Settings are synced by the host and locked after leaving the Airport."
-            : "Read only • Only the lobby host can change these settings. F2: close.";
+            ? $"{Plugin.MenuKeyDisplayName}: close • Settings are synced by the host and locked after leaving the Airport."
+            : $"Read only • Only the lobby host can change these settings. {Plugin.MenuKeyDisplayName}: close.";
         GUI.Label(
             new Rect(panel.x + Padding, panel.yMax - 38f, panel.width - Padding * 2, 30f),
             hint,
