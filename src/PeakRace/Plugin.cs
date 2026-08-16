@@ -50,6 +50,7 @@ public partial class Plugin : BaseUnityPlugin
         DontDestroyOnLoad(systemsObject);
         RaceSettingsManager settingsManager = systemsObject.AddComponent<RaceSettingsManager>();
         settingsManager.Initialize(Config);
+        systemsObject.AddComponent<CampfireProgressionController>();
         systemsObject.AddComponent<PlayerCampfireProgressTracker>();
         systemsObject.AddComponent<RaceRespawnController>();
         systemsObject.AddComponent<PvpBlowgunManager>();

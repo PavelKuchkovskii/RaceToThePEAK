@@ -73,6 +73,14 @@ internal sealed class PlayerCampfireProgressTracker : MonoBehaviourPunCallbacks
             return null;
         }
 
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (settings.WaitMode != CampfireWaitMode.Nobody)
+        {
+            // Team and lobby checkpoints are earned only by a validated logical
+            // completion, not merely by standing in a biome somebody else loaded.
+            return CampfireProgressionController.Instance?.GetCompletedCampfire(character);
+        }
+
         int campfireIndex = Instance != null
             ? Instance.GetFurthestReachedCampfire(character)
             : ResolveReachedCampfireFromPosition(character);

@@ -52,17 +52,33 @@ internal class TeamHandler
 
     public static int getPlayerTeam(string name)
     {
-        foreach ((string charName, int team) in charTeam)
+        if (TryGetPlayerTeam(name, out int team))
         {
-            if (charName == name)
-            {
-                Debug.Log($"[RaceToThePeak] Loading Player {charName} to team {team}");
-                return team;
-            }
-
+            Debug.Log($"[RaceToThePeak] Loading Player {name} to team {team}");
+            return team;
         }
         Debug.Log($"[RaceToThePeak] {name} was not found");
         return 0;
+    }
+
+    public static bool TryGetPlayerTeam(string name, out int team)
+    {
+        foreach ((string charName, int storedTeam) in charTeam)
+        {
+            if (charName == name)
+            {
+                team = storedTeam;
+                return true;
+            }
+        }
+
+        team = 0;
+        return false;
+    }
+
+    public static void removeCharacter(string character)
+    {
+        charTeam.RemoveAll(entry => entry.charName == character);
     }
 
     static void setupArmbandPrefabs()

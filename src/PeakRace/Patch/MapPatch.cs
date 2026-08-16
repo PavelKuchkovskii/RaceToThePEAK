@@ -1,115 +1,86 @@
 using HarmonyLib;
-using Photon.Pun;
 using PeakRace.Core;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Emit;
-using UnityEngine;
 
 namespace PeakRace.Patch;
 
 [HarmonyPatch]
 internal static class MapPatch
 {
-    // PEAK 2.x added a third (segment) argument to RPCA_ReviveAtPosition.
-    // Only the master client sends the revive RPC so each player is revived once.
-    [HarmonyPatch(typeof(Campfire), "Light_Rpc")]
-    [HarmonyPrefix]
-    private static void ReviveAtLitCampfire(Campfire __instance, bool updateSegment)
-    {
-        if (!updateSegment
-            || !PhotonNetwork.IsMasterClient
-            || !RaceSettingsManager.Current.UsesNextCampfireRespawn)
-        {
-            return;
-        }
-
-        // PlayerHandler is used instead of Character.AllCharacters so bots and
-        // modded NPCs are ignored while PEAK Unlimited players are all included.
-        List<Character> deadCharacters = PlayerHandler.GetAllPlayerCharacters()
-            .Where(character => character != null
-                && character.data != null
-                && character.data.dead)
-            .ToList();
-
-        if (deadCharacters.Count == 0)
-        {
-            return;
-        }
-
-        int completedSegment = MapHandler.Exists
-            ? (int)MapHandler.CurrentSegmentNumber
-            : Mathf.Max(0, (int)__instance.advanceToSegment - 1);
-
-        for (int index = 0; index < deadCharacters.Count; index++)
-        {
-            // A golden-angle spiral avoids stacking players in large Unlimited lobbies.
-            float angle = index * 2.39996323f;
-            float radius = 2f + Mathf.Sqrt(index) * 0.65f;
-            Vector3 offset = new Vector3(Mathf.Cos(angle) * radius, 5f, Mathf.Sin(angle) * radius);
-            Character character = deadCharacters[index];
-
-            character.photonView.RPC(
-                "RPCA_ReviveAtPosition",
-                RpcTarget.All,
-                __instance.transform.position + offset,
-                true,
-                completedSegment);
-        }
-
-        Plugin.Log.LogInfo($"Reviving {deadCharacters.Count} player(s) at the lit campfire.");
-    }
-
-    // Restart timers only for a real segment transition. Light_Rpc is also used
-    // to synchronize an already-lit fire to players who join late.
-    [HarmonyPatch(typeof(Campfire), "Light_Rpc")]
-    [HarmonyPostfix]
-    private static void RestartTimers(bool updateSegment)
-    {
-        if (!updateSegment)
-        {
-            return;
-        }
-
-        foreach (Character character in Character.AllCharacters)
-        {
-            if (character == null || character.isBot)
-            {
-                continue;
-            }
-
-            CharacterTeamInfo teamInfo = character.GetComponent<CharacterTeamInfo>();
-            if (teamInfo != null)
-            {
-                teamInfo.timeOn = true;
-            }
-        }
-    }
-
-    // A racer can light a fire without waiting for every other living player.
-    // This bypass is scoped to lighting; the original range checks still control
-    // morale, resting and whether a lit fire can burn out.
+    // The prompt is derived from the synchronized waiting policy. A physically
+    // lit fire remains claimable by a team that has not completed it yet.
     [HarmonyPatch(typeof(Campfire), nameof(Campfire.GetInteractionText))]
     [HarmonyPostfix]
     private static void AllowSoloCampfirePrompt(Campfire __instance, ref string __result)
     {
-        if (__instance.state == Campfire.FireState.Off)
+        CampfireProgressionController progression = CampfireProgressionController.Instance;
+        Character character = Character.localCharacter;
+        if (progression == null
+            || character == null
+            || (__instance.state != Campfire.FireState.Off
+                && !progression.RequiresCompletion(character, __instance)))
         {
-            __result = LocalizedText.GetText("LIGHT");
+            return;
+        }
+
+        if (progression.CanCompleteCampfire(character, __instance, out string rejectionText))
+        {
+            __result = __instance.state == Campfire.FireState.Off
+                ? LocalizedText.GetText("LIGHT")
+                : "COMPLETE CHECKPOINT";
+        }
+        else
+        {
+            __result = rejectionText;
         }
     }
 
     [HarmonyPatch(typeof(Campfire), nameof(Campfire.Interact_CastFinished))]
     [HarmonyPrefix]
-    private static bool AllowSoloCampfireActivation(Campfire __instance)
+    private static bool ApplyCampfireWaitingPolicy(Campfire __instance, Character interactor)
     {
-        if (__instance.state != Campfire.FireState.Off)
+        CampfireProgressionController progression = CampfireProgressionController.Instance;
+        if (progression == null
+            || (__instance.state != Campfire.FireState.Off
+                && !progression.RequiresCompletion(interactor, __instance)))
         {
             return true;
         }
 
-        __instance.DebugLight();
+        progression.RequestCompletion(interactor, __instance);
         return false;
+    }
+
+    [HarmonyPatch(typeof(Campfire), nameof(Campfire.IsInteractible))]
+    [HarmonyPostfix]
+    private static void AllowUncompletedCheckpointInteraction(
+        Campfire __instance,
+        Character interactor,
+        ref bool __result)
+    {
+        if (CampfireProgressionController.Instance?.RequiresCompletion(
+            interactor,
+            __instance) == true)
+        {
+            __result = true;
+        }
+    }
+
+    [HarmonyPatch(typeof(Campfire), nameof(Campfire.IsConstantlyInteractable))]
+    [HarmonyPostfix]
+    private static void AllowUncompletedCheckpointCast(
+        Campfire __instance,
+        Character interactor,
+        ref bool __result)
+    {
+        if (CampfireProgressionController.Instance?.RequiresCompletion(
+            interactor,
+            __instance) == true)
+        {
+            __result = true;
+        }
     }
 
     [HarmonyPatch(typeof(RespawnChest), nameof(RespawnChest.GetInteractionText))]

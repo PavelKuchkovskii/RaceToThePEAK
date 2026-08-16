@@ -16,6 +16,7 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
     public bool teamGUIOn;
     public bool timeOn;
     public int teamInt;
+    public bool HasExplicitTeam { get; private set; }
     public float time;
     public string timeString;
     public float checkpointRadius;
@@ -86,7 +87,16 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
     //This is a call to make initial changeTeam call after the Armband Awake so it doesnt throw an error
     public void InitializeTeam()
     {
-        changeTeam(TeamHandler.getPlayerTeam(myChar.name));
+        if (TeamHandler.TryGetPlayerTeam(myChar.name, out int selectedTeam))
+        {
+            SendTeamChange(selectedTeam, explicitTeam: true);
+        }
+        else
+        {
+            // Keep the first armband material as a harmless visual default,
+            // while progression treats this player as a one-person team.
+            SendTeamChange(0, explicitTeam: false);
+        }
     }
 
     private void FixedUpdate()
@@ -152,7 +162,12 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
                 campfireList.RemoveAt(idx);
                 // A racer arriving after somebody else advanced must keep timing.
                 // Only pause while this racer still has to activate an unlit fire.
-                if (!campfire.Lit)
+                bool waitsForLogicalCompletion =
+                    RaceSettingsManager.Current.WaitMode != CampfireWaitMode.Nobody
+                    && CampfireProgressionController.Instance?.RequiresCompletion(
+                        myChar,
+                        campfire) == true;
+                if (!campfire.Lit || waitsForLogicalCompletion)
                 {
                     timeOn = false;
                     Debug.Log($"[RaceToThePeak] Timer was paused for {myChar.name} at an unlit campfire");
@@ -190,19 +205,81 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
     // sends new team data to all clients
     public void changeTeam(int newTeam)
     {
-        if(!photonView.IsMine)
-        { return; }
-        photonView.RPC("RPCA_ChangeTeam", RpcTarget.AllBuffered, newTeam);
+        SendTeamChange(newTeam, explicitTeam: true);
+    }
+
+    private void SendTeamChange(int newTeam, bool explicitTeam)
+    {
+        if (!photonView.IsMine || newTeam < 0 || newTeam >= Plugin.teamList.Count)
+        {
+            return;
+        }
+
+        photonView.RPC("RPCA_ChangeTeam", RpcTarget.AllBuffered, newTeam, explicitTeam);
     }
 
     [PunRPC]
-    public void RPCA_ChangeTeam(int newTeam)
+    public void RPCA_ChangeTeam(int newTeam, bool explicitTeam, PhotonMessageInfo messageInfo)
     {
+        if (messageInfo.Sender == null
+            || photonView.Owner == null
+            || messageInfo.Sender.ActorNumber != photonView.Owner.ActorNumber
+            || newTeam < 0
+            || newTeam >= Plugin.teamList.Count)
+        {
+            Plugin.Log.LogWarning("Rejected an invalid character team update.");
+            return;
+        }
+
         teamInt = newTeam;
-        TeamHandler.addCharacter(myChar.name, newTeam);
+        HasExplicitTeam = explicitTeam;
+        if (explicitTeam)
+        {
+            TeamHandler.addCharacter(myChar.name, newTeam);
+        }
+        else
+        {
+            TeamHandler.removeCharacter(myChar.name);
+        }
         if(myChar.TryGetComponent<Armband>(out Armband armband))
         {
             armband.changeArmband(newTeam);
         }
+    }
+
+    internal void RequestCampfireCompletion(int campfireIndex)
+    {
+        if (!photonView.IsMine || campfireIndex < 0)
+        {
+            return;
+        }
+
+        if (!PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient)
+        {
+            CampfireProgressionController.Instance?.HandleCompletionRequest(myChar, campfireIndex);
+            return;
+        }
+
+        photonView.RPC(
+            nameof(RPCA_RequestCampfireCompletion),
+            RpcTarget.MasterClient,
+            campfireIndex);
+    }
+
+    [PunRPC]
+    private void RPCA_RequestCampfireCompletion(
+        int campfireIndex,
+        PhotonMessageInfo messageInfo)
+    {
+        if (!PhotonNetwork.IsMasterClient
+            || messageInfo.Sender == null
+            || photonView.Owner == null
+            || messageInfo.Sender.ActorNumber != photonView.Owner.ActorNumber)
+        {
+            Plugin.Log.LogWarning("Rejected an unauthorized campfire completion request.");
+            return;
+        }
+
+        CampfireProgressionController.Instance?.HandleCompletionRequest(myChar, campfireIndex);
     }
 }

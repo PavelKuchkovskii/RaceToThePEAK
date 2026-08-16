@@ -29,13 +29,12 @@ internal static class RespawnPatch
         }
     }
 
-    // Modes with guaranteed self-respawn must not lose the run when the last
-    // living racer dies. A next-campfire strategy intentionally keeps vanilla
-    // game-over because no living racer would remain to activate that fire.
+    // Preserve PEAK's authoritative full-lobby wipe in every mode. Partial
+    // deaths are handled after this check by the selected respawn strategy.
     [HarmonyPatch(typeof(Character), nameof(Character.CheckEndGame))]
     [HarmonyPrefix]
-    private static bool KeepRunAliveForSelfRespawn()
+    private static bool PreserveFullLobbyWipe()
     {
-        return RaceSettingsManager.Current.UsesNextCampfireRespawn;
+        return true;
     }
 }

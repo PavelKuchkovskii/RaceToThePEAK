@@ -41,6 +41,7 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
 
     private readonly Dictionary<int, PendingRespawn> pendingRespawns = new();
     private readonly HashSet<int> immediateRevivesSent = new();
+    private readonly HashSet<RaceTeamScope> teamWipeRevivesSent = new();
 
     internal static RaceRespawnController Instance { get; private set; }
 
@@ -68,6 +69,12 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
 
         // Scout flags call Character.TryCheckpoint before RPCA_Die. Reaching
         // this method therefore means the flag did not revive the player.
+        if (!GetPlayerCharacters().Any(candidate => !IsActuallyDead(candidate)))
+        {
+            // The final real death belongs to PEAK's ordinary full-lobby wipe.
+            return;
+        }
+
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;
         if (settings.UsesCorpseTimerRespawn)
         {
@@ -83,6 +90,45 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
         }
         // Next-campfire deaths remain as bones until MapPatch observes the
         // next real campfire activation. If every racer dies, PEAK may end the run.
+    }
+
+    internal void HandleCampfireCompleted(
+        Character completingCharacter,
+        Campfire campfire,
+        int completedCampfireIndex)
+    {
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (!IsAuthority
+            || !settings.UsesNextCampfireRespawn
+            || completingCharacter == null
+            || campfire == null)
+        {
+            return;
+        }
+
+        RaceTeamScope completingTeam = RaceTeamScope.ForCharacter(completingCharacter);
+        List<Character> waitingCharacters = GetPlayerCharacters()
+            .Where(character => IsActuallyDead(character)
+                && (settings.WaitMode == CampfireWaitMode.Lobby
+                    || settings.WaitMode == CampfireWaitMode.Team
+                        && completingTeam.Contains(character)))
+            .ToList();
+
+        for (int index = 0; index < waitingCharacters.Count; index++)
+        {
+            Character character = waitingCharacters[index];
+            SendRevive(
+                character,
+                AddSpiralOffset(campfire.transform.position, index, verticalOffset: 5f),
+                completedCampfireIndex);
+        }
+
+        if (waitingCharacters.Count > 0)
+        {
+            Plugin.Log.LogInfo(
+                $"Respawning {waitingCharacters.Count} player(s) at completed "
+                + $"campfire {completedCampfireIndex}.");
+        }
     }
 
     private void Update()
@@ -107,6 +153,15 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
         {
             pendingRespawns.Clear();
             ReconcileImmediateRespawns();
+        }
+        else if (settings.UsesNextCampfireRespawn)
+        {
+            pendingRespawns.Clear();
+            immediateRevivesSent.Clear();
+            if (IsAuthority)
+            {
+                ReconcileTeamWipeRespawns();
+            }
         }
         else
         {
@@ -219,6 +274,44 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
         }
     }
 
+    private void ReconcileTeamWipeRespawns()
+    {
+        List<Character> characters = GetPlayerCharacters().ToList();
+        if (!characters.Any(character => !IsActuallyDead(character)))
+        {
+            // A full lobby wipe always ends the run.
+            return;
+        }
+
+        foreach (IGrouping<RaceTeamScope, Character> team in characters.GroupBy(
+            RaceTeamScope.ForCharacter))
+        {
+            if (team.Any(character => !IsActuallyDead(character)))
+            {
+                teamWipeRevivesSent.Remove(team.Key);
+                continue;
+            }
+
+            if (!teamWipeRevivesSent.Add(team.Key))
+            {
+                continue;
+            }
+
+            int index = 0;
+            foreach (Character character in team)
+            {
+                Vector3 position = AddSpiralOffset(
+                    GetPreviousCampfirePosition(character, includeActorOffset: false),
+                    index++,
+                    verticalOffset: 2f);
+                SendRevive(character, position);
+            }
+
+            Plugin.Log.LogInfo(
+                $"Reviving fully wiped {team.Key} at its last completed checkpoint.");
+        }
+    }
+
     private void SendPreviousCampfireRespawn(Character character)
     {
         int viewId = character.photonView.ViewID;
@@ -252,7 +345,9 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
             $"PVP blowgun knockout moved {character.characterName} to the previous campfire.");
     }
 
-    private static Vector3 GetPreviousCampfirePosition(Character character)
+    internal static Vector3 GetPreviousCampfirePosition(
+        Character character,
+        bool includeActorOffset = true)
     {
         Vector3 position = character.LastLivingPosition;
         if (MapHandler.Exists)
@@ -273,20 +368,41 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
             }
         }
 
+        if (!includeActorOffset)
+        {
+            return position;
+        }
+
         int actorNumber = character.photonView.Owner?.ActorNumber ?? character.photonView.ViewID;
         float angle = actorNumber * 2.39996323f;
         Vector3 offset = new(Mathf.Cos(angle) * 2f, 2f, Mathf.Sin(angle) * 2f);
         return position + offset;
     }
 
-    private static void SendRevive(Character character, Vector3 position)
+    private static Vector3 AddSpiralOffset(
+        Vector3 origin,
+        int index,
+        float verticalOffset)
+    {
+        float angle = index * 2.39996323f;
+        float radius = 2f + Mathf.Sqrt(index) * 0.65f;
+        return origin + new Vector3(
+            Mathf.Cos(angle) * radius,
+            verticalOffset,
+            Mathf.Sin(angle) * radius);
+    }
+
+    private static void SendRevive(
+        Character character,
+        Vector3 position,
+        int completedCampfireIndex = -1)
     {
         character.photonView.RPC(
             "RPCA_ReviveAtPosition",
             RpcTarget.All,
             position,
             true,
-            -1);
+            completedCampfireIndex);
     }
 
     private static bool TryGetCharacter(int viewId, out Character character)
@@ -474,6 +590,7 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
 
         pendingRespawns.Clear();
         immediateRevivesSent.Clear();
+        teamWipeRevivesSent.Clear();
     }
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
