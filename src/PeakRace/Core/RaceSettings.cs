@@ -452,6 +452,22 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         }
     }
 
+    internal bool SetPvpDeathRespawn(PvpDeathRespawnMode mode)
+    {
+        if (!CanEditLobbySettings
+            || !Enum.IsDefined(typeof(PvpDeathRespawnMode), mode)
+            || !RaceSettingsSnapshot.IsCombinationAllowed(
+                waitModeConfig.Value,
+                modeConfig.Value,
+                mode))
+        {
+            return false;
+        }
+
+        pvpDeathRespawnConfig.Value = mode;
+        return true;
+    }
+
     internal void TogglePvpChestRefresh()
     {
         if (CanEditLobbySettings)
