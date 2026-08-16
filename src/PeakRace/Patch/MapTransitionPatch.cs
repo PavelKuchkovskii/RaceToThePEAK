@@ -21,9 +21,7 @@ internal static class MapTransitionPatch
 
         HarmonyMethod transpiler = new HarmonyMethod(
             AccessTools.Method(typeof(MapTransitionPatch), nameof(KeepPreviousBiomeActive)));
-        HarmonyMethod postfix = new HarmonyMethod(
-            AccessTools.Method(typeof(MapTransitionPatch), nameof(KeepPassedBoundariesOpen)));
-        harmony.Patch(moveNext, transpiler: transpiler, postfix: postfix);
+        harmony.Patch(moveNext, transpiler: transpiler);
     }
 
     private static MethodInfo FindSegmentTransitionCoroutine()
@@ -86,8 +84,8 @@ internal static class MapTransitionPatch
                     continue;
                 }
 
-                // Keep the old segment active instead of disabling it. All of
-                // the game's remaining transition/fog/network logic stays intact.
+                // Defer old-segment removal to BiomeLifecycleController, which
+                // can account for lagging teams and valid respawn destinations.
                 codes[index - 1].opcode = OpCodes.Ldc_I4_1;
                 codes[index - 1].operand = null;
                 patched = true;
@@ -102,7 +100,7 @@ internal static class MapTransitionPatch
 
         if (patched)
         {
-            Plugin.Log.LogInfo("Previous biomes will remain active after campfire transitions.");
+            Plugin.Log.LogInfo("Previous-biome removal is managed by the race lifecycle policy.");
         }
         else
         {
@@ -112,39 +110,4 @@ internal static class MapTransitionPatch
         return codes;
     }
 
-    private static void KeepPassedBoundariesOpen()
-    {
-        if (!MapHandler.Exists || VoidBiome.VoidBiomeActive)
-        {
-            return;
-        }
-
-        int currentSegment = (int)MapHandler.CurrentSegmentNumber;
-        if (currentSegment < 0)
-        {
-            return;
-        }
-
-        // Vanilla seals the bottom of the newly activated biome because every
-        // living scout was normally required to be at the fire. Solo campfire
-        // activation leaves racers below that seal, so remove only this passed
-        // boundary. wallNext stays active and still protects the unloaded biome.
-        MapHandler.MapSegment activeSegment = MapHandler.CurrentMapSegment;
-        if (activeSegment?.wallPrevious != null && activeSegment.wallPrevious.activeSelf)
-        {
-            activeSegment.wallPrevious.SetActive(false);
-        }
-
-        // PEAK also disables campfire roots that are more than one segment
-        // behind. They contain the old camp, luggage and connection geometry,
-        // all of which must remain available to racers who are still climbing.
-        for (int index = 0; index < currentSegment; index++)
-        {
-            GameObject previousCamp = MapHandler.GetCampfireRoot(index);
-            if (previousCamp != null && !previousCamp.activeSelf)
-            {
-                previousCamp.SetActive(true);
-            }
-        }
-    }
 }

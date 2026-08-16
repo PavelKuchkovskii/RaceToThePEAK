@@ -445,6 +445,26 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
         }
     }
 
+    internal int GetLowestPendingRespawnSegment()
+    {
+        int lowestSegment = int.MaxValue;
+        foreach (PendingRespawn pending in pendingRespawns.Values)
+        {
+            if (!LocalBiomeEnvironmentController.TryResolveWorldPositionSegment(
+                pending.Position,
+                out int segment))
+            {
+                // Unknown map layouts are retained rather than risking removal
+                // of a live corpse-timer destination.
+                return 0;
+            }
+
+            lowestSegment = Mathf.Min(lowestSegment, segment);
+        }
+
+        return lowestSegment == int.MaxValue ? -1 : lowestSegment;
+    }
+
     private void PublishCorpseDeadline(int viewId)
     {
         if (!PhotonNetwork.InRoom

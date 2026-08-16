@@ -165,6 +165,24 @@ internal sealed class LocalBiomeEnvironmentController : MonoBehaviour
         return segment >= 0;
     }
 
+    internal static bool TryResolveWorldPositionSegment(Vector3 position, out int segment)
+    {
+        segment = -1;
+        if (!MapHandler.ExistsAndInitialized || VoidBiome.VoidBiomeActive)
+        {
+            return false;
+        }
+
+        MapHandler map = Singleton<MapHandler>.Instance;
+        if (map == null || map.segments == null || map.segments.Length == 0)
+        {
+            return false;
+        }
+
+        segment = ResolveSegmentFromProgress(map, position.z, -1);
+        return segment >= 0;
+    }
+
     private bool RefreshVisualSegment(
         out MapHandler map,
         out DayNightManager dayNightManager)
