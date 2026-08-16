@@ -1,3 +1,15 @@
+### 0.9.0
+* Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.
+* Added host-authoritative, monotonic player/team/lobby checkpoint progress with Photon late-join and host-migration synchronization.
+* Players without an explicitly selected troop are treated as one-person teams; disconnected players and bots never block a campfire.
+* Disabled next-campfire death respawning when waiting for nobody, including PVP real deaths, and safely migrate incompatible old/configured combinations to previous-campfire respawning.
+* Later teams can logically complete an already-lit campfire. Loaded transitions are blocked locally only for teams that have not completed them, and passed barriers never return for eligible teams.
+* Reworked biome retention to preserve one contiguous route for lagging players, unfinished teams, corpse timers, previous-campfire targets and PVP blowgun returns, then unload genuinely unneeded older segments.
+* Scoped final rising lava/Gloom by waiting policy: per player for nobody, shared per team for team waiting, and vanilla global behavior for lobby waiting. Existing no-reset-on-death behavior is unchanged.
+* A fully wiped team now returns to its own last completed checkpoint while another team remains alive; another team's later fire can no longer pull it forward. A full lobby wipe still ends the run.
+* Rebuilt the host F3 lobby menu into scrollable Progression, Respawn, PVP and Current Rules sections with contextual descriptions, compatibility validation and responsive sizing.
+* Hardened team-change and campfire-completion RPC validation so the master client verifies sender ownership, range, team readiness and sequential checkpoint progress.
+
 ### 0.8.5
 * Moved RaceToThePeak's host lobby and in-run panels to an independent configurable key, defaulting to F3.
 * Removed the Harmony interception and forced closing of PEAK Unlimited's configuration window; PEAK Unlimited retains full ownership of its F2 binding.

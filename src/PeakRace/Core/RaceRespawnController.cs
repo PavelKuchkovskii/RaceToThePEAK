@@ -424,7 +424,9 @@ internal sealed class RaceRespawnController : MonoBehaviourPunCallbacks
         return Character.AllCharacters.Where(character =>
             character != null
             && !character.isBot
-            && character.photonView != null);
+            && character.photonView != null
+            && (character.photonView.Owner == null
+                || !character.photonView.Owner.IsInactive));
     }
 
     internal void CollectCountdowns(List<Countdown> output)
