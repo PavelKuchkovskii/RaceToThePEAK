@@ -3,6 +3,7 @@ using Peak;
 using Photon.Pun;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Zorro.Core;
@@ -10,9 +11,9 @@ using Zorro.Core;
 namespace PeakRace.Core;
 
 /// <summary>
-/// Replaces PEAK's single synchronized final-biome rising field with a stable
-/// Photon start timestamp per player. Rendering follows the observed player;
-/// damage/status checks follow the local player.
+/// Selects the final-biome rising-field clock from the configured progression
+/// scope. Nobody mode uses actor clocks, Team mode uses team clocks, and Lobby
+/// mode leaves PEAK's vanilla global synchronization untouched.
 /// </summary>
 internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
 {
@@ -31,12 +32,19 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
 
     internal static FinalHazardController Instance { get; private set; }
 
-    private readonly Dictionary<int, double> actorStartTimes = new();
+    private readonly Dictionary<string, double> scopeStartTimes = new();
     private readonly Dictionary<int, HazardState> hazardStates = new();
-    private readonly HashSet<int> riseMessageShownForActors = new();
+    private readonly HashSet<string> riseMessageShownForScopes = new();
 
     private bool clearedOutsideRun;
-    private double offlineStartTime = -1d;
+
+    private static bool UsesScopedHazards =>
+        RaceSettingsManager.Current.WaitMode != CampfireWaitMode.Lobby;
+
+    internal static bool UsesVanillaGlobalHazard => !UsesScopedHazards;
+
+    private static bool IsAuthority =>
+        !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
 
     private void Awake()
     {
@@ -64,13 +72,18 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
         }
 
         clearedOutsideRun = false;
+        if (!UsesScopedHazards)
+        {
+            return;
+        }
+
         foreach (LavaRising hazard in LavaRising.ALL_LAVA)
         {
             if (IsManagedFinalHazard(hazard) && IsHazardEnabled(hazard))
             {
                 HazardState state = GetOrCreateState(hazard);
                 CaptureAuthoredEventRelease(hazard, state);
-                EnsureLocalStartPublished(hazard, state);
+                EnsureScopedStartsPublished(hazard, state);
             }
         }
     }
@@ -106,7 +119,7 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
     internal static bool TryDrive(LavaRising hazard)
     {
         FinalHazardController controller = Instance;
-        if (controller == null || !IsManagedFinalHazard(hazard))
+        if (controller == null || !IsManagedFinalHazard(hazard) || !UsesScopedHazards)
         {
             return false;
         }
@@ -124,7 +137,7 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
             return true;
         }
 
-        return controller.LocalPlayerHasActiveField(hazard);
+        return !UsesScopedHazards || controller.LocalPlayerHasActiveField(hazard);
     }
 
     internal static bool TryShouldRunManagedVisual(Component visual, out bool shouldRun)
@@ -133,6 +146,12 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
         if (visual == null || !TryFindOwningFinalHazard(visual, out LavaRising hazard))
         {
             return false;
+        }
+
+        if (!UsesScopedHazards)
+        {
+            shouldRun = true;
+            return true;
         }
 
         Character observed = GetObservedCharacter();
@@ -151,26 +170,20 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
             return;
         }
 
-        EnsureLocalStartPublished(hazard, state);
+        EnsureScopedStartsPublished(hazard, state);
 
         Character observed = GetObservedCharacter();
-        int observedActor = 0;
+        string observedScope = null;
         double startTime = 0d;
-        bool hasStartTime = TryGetActorNumber(observed, out observedActor) &&
-            TryGetStartTime(observedActor, out startTime);
-        if (!hasStartTime && !PhotonNetwork.InRoom && observed == Character.localCharacter &&
-            offlineStartTime > 0d)
-        {
-            hasStartTime = true;
-            startTime = offlineStartTime;
-        }
+        bool hasStartTime = TryGetScopeKey(observed, out observedScope)
+            && TryGetStartTime(observedScope, out startTime);
 
         ApplyProgress(hazard, state, hasStartTime, startTime, observed);
 
         if (state.ObservedStarted &&
-            TryGetActorNumber(Character.localCharacter, out int localActor) &&
-            observedActor == localActor &&
-            riseMessageShownForActors.Add(localActor))
+            TryGetScopeKey(Character.localCharacter, out string localScope) &&
+            observedScope == localScope &&
+            riseMessageShownForScopes.Add(localScope))
         {
             ShowRiseMessage(hazard);
         }
@@ -226,33 +239,42 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
         hazard.lava.MovePosition(new Vector3(position.x, targetHeight, position.z));
     }
 
-    private void EnsureLocalStartPublished(LavaRising hazard, HazardState state)
+    private void EnsureScopedStartsPublished(LavaRising hazard, HazardState state)
     {
-        if (!IsHazardEnabled(hazard) || !state.EventReleased || !Ascents.fogEnabled)
+        if (!IsAuthority
+            || !IsHazardEnabled(hazard)
+            || !state.EventReleased
+            || !Ascents.fogEnabled)
         {
             return;
         }
 
-        Character localCharacter = Character.localCharacter;
-        if (localCharacter == null || localCharacter.data == null || localCharacter.data.dead ||
-            !CharacterIsInHazardSegment(localCharacter, hazard))
+        foreach (Character character in GetActivePlayerCharacters())
+        {
+            if (character.data == null
+                || character.data.dead
+                || !CharacterIsInHazardSegment(character, hazard)
+                || !TryGetScopeKey(character, out string scopeKey))
+            {
+                continue;
+            }
+
+            EnsureScopeStartPublished(scopeKey);
+        }
+    }
+
+    private void EnsureScopeStartPublished(string scopeKey)
+    {
+        if (TryGetStartTime(scopeKey, out _))
         {
             return;
         }
 
+        double startTime = NetworkTime;
         if (!PhotonNetwork.InRoom)
         {
-            if (offlineStartTime <= 0d)
-            {
-                offlineStartTime = NetworkTime;
-                Plugin.Log.LogInfo("Local final hazard timer started (offline).");
-            }
-            return;
-        }
-
-        if (!TryGetActorNumber(localCharacter, out int actorNumber) ||
-            actorStartTimes.ContainsKey(actorNumber))
-        {
+            scopeStartTimes[scopeKey] = startTime;
+            Plugin.Log.LogInfo($"Final hazard timer started for {scopeKey} (offline).");
             return;
         }
 
@@ -261,7 +283,7 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
             return;
         }
 
-        string propertyKey = StartTimeKey(actorNumber);
+        string propertyKey = StartTimeKey(scopeKey);
         if (PhotonNetwork.CurrentRoom.CustomProperties.TryGetValue(propertyKey, out object existing))
         {
             try
@@ -269,7 +291,7 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
                 double existingStart = Convert.ToDouble(existing);
                 if (existingStart > 0d)
                 {
-                    actorStartTimes[actorNumber] = existingStart;
+                    scopeStartTimes[scopeKey] = existingStart;
                     return;
                 }
             }
@@ -279,8 +301,6 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
             }
         }
 
-        double startTime = NetworkTime;
-        actorStartTimes[actorNumber] = startTime;
         Hashtable properties = new()
         {
             [propertyKey] = startTime
@@ -288,12 +308,12 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
         if (!PhotonNetwork.CurrentRoom.SetCustomProperties(properties))
         {
             Plugin.Log.LogWarning(
-                $"Photon rejected final hazard start time for actor {actorNumber}; " +
-                "the local cached timer will still be used.");
+                $"Photon rejected final hazard start time for {scopeKey}.");
         }
         else
         {
-            Plugin.Log.LogInfo($"Final hazard timer started for actor {actorNumber}.");
+            scopeStartTimes[scopeKey] = startTime;
+            Plugin.Log.LogInfo($"Final hazard timer started for {scopeKey}.");
         }
     }
 
@@ -311,21 +331,10 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
         }
 
         double startTime;
-        if (PhotonNetwork.InRoom)
+        if (!TryGetScopeKey(localCharacter, out string scopeKey)
+            || !TryGetStartTime(scopeKey, out startTime))
         {
-            if (!TryGetActorNumber(localCharacter, out int actorNumber) ||
-                !TryGetStartTime(actorNumber, out startTime))
-            {
-                return false;
-            }
-        }
-        else
-        {
-            startTime = offlineStartTime;
-            if (startTime <= 0d)
-            {
-                return false;
-            }
+            return false;
         }
 
         return NetworkTime >= startTime + Math.Max(0d, hazard.initialWaitTime);
@@ -453,18 +462,57 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
         return actorNumber > 0;
     }
 
-    private bool TryGetStartTime(int actorNumber, out double startTime)
+    private static bool TryGetScopeKey(Character character, out string scopeKey)
     {
-        return actorStartTimes.TryGetValue(actorNumber, out startTime) && startTime > 0d;
+        scopeKey = null;
+        if (character == null || !UsesScopedHazards)
+        {
+            return false;
+        }
+
+        if (RaceSettingsManager.Current.WaitMode == CampfireWaitMode.Team)
+        {
+            scopeKey = RaceTeamScope.ForCharacter(character).PropertySuffix;
+            return true;
+        }
+
+        if (!TryGetActorNumber(character, out int actorNumber))
+        {
+            return false;
+        }
+
+        scopeKey = $"Actor.{actorNumber}";
+        return true;
+    }
+
+    private bool TryGetStartTime(string scopeKey, out double startTime)
+    {
+        startTime = 0d;
+        return scopeKey != null
+            && scopeStartTimes.TryGetValue(scopeKey, out startTime)
+            && startTime > 0d;
     }
 
     private static double NetworkTime => PhotonNetwork.InRoom
         ? PhotonNetwork.Time
         : Time.unscaledTime;
 
-    private static string StartTimeKey(int actorNumber)
+    private static string StartTimeKey(string scopeKey)
     {
-        return StartTimePrefix + actorNumber;
+        return StartTimePrefix + scopeKey;
+    }
+
+    private static IEnumerable<Character> GetActivePlayerCharacters()
+    {
+        IEnumerable<Character> source = PhotonNetwork.InRoom
+            ? PlayerHandler.GetAllPlayerCharacters()
+            : Character.AllCharacters;
+        return source.Where(character =>
+            character != null
+            && !character.isBot
+            && character.photonView != null
+            && (character.photonView.Owner == null
+                || !character.photonView.Owner.IsInactive));
     }
 
     private static void ShowRiseMessage(LavaRising hazard)
@@ -498,39 +546,76 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
 
         foreach (object rawKey in properties.Keys)
         {
-            if (rawKey is not string key ||
-                !key.StartsWith(StartTimePrefix, StringComparison.Ordinal) ||
-                !int.TryParse(key.Substring(StartTimePrefix.Length), out int actorNumber))
+            if (rawKey is not string key
+                || !key.StartsWith(StartTimePrefix, StringComparison.Ordinal)
+                || !TryNormalizeScopeKey(
+                    key.Substring(StartTimePrefix.Length),
+                    out string scopeKey))
             {
+                continue;
+            }
+
+            object boxed = properties[rawKey];
+            if (boxed == null)
+            {
+                scopeStartTimes.Remove(scopeKey);
                 continue;
             }
 
             try
             {
-                double startTime = Convert.ToDouble(properties[rawKey]);
-                if (startTime > 0d)
+                double startTime = Convert.ToDouble(boxed);
+                if (startTime > 0d && startTime <= NetworkTime + 30d)
                 {
-                    actorStartTimes[actorNumber] = startTime;
+                    scopeStartTimes[scopeKey] = startTime;
                 }
                 else
                 {
-                    actorStartTimes.Remove(actorNumber);
+                    scopeStartTimes.Remove(scopeKey);
                 }
             }
             catch (Exception)
             {
-                actorStartTimes.Remove(actorNumber);
+                scopeStartTimes.Remove(scopeKey);
                 Plugin.Log.LogWarning($"Ignored malformed final hazard time '{key}'.");
             }
         }
     }
 
+    private static bool TryNormalizeScopeKey(string rawScope, out string scopeKey)
+    {
+        scopeKey = null;
+        if (int.TryParse(rawScope, out int legacyActor) && legacyActor > 0)
+        {
+            scopeKey = $"Actor.{legacyActor}";
+            return true;
+        }
+
+        if (rawScope.StartsWith("Actor.", StringComparison.Ordinal)
+            && int.TryParse(rawScope.Substring("Actor.".Length), out int actorNumber)
+            && actorNumber > 0)
+        {
+            scopeKey = $"Actor.{actorNumber}";
+            return true;
+        }
+
+        if (rawScope.StartsWith("Team.", StringComparison.Ordinal)
+            && int.TryParse(rawScope.Substring("Team.".Length), out int teamNumber)
+            && teamNumber >= 0
+            && teamNumber < 64)
+        {
+            scopeKey = $"Team.{teamNumber}";
+            return true;
+        }
+
+        return false;
+    }
+
     private void ClearRunState(bool clearRoomProperties)
     {
-        actorStartTimes.Clear();
+        scopeStartTimes.Clear();
         hazardStates.Clear();
-        riseMessageShownForActors.Clear();
-        offlineStartTime = -1d;
+        riseMessageShownForScopes.Clear();
 
         if (!clearRoomProperties || !PhotonNetwork.InRoom ||
             !PhotonNetwork.IsMasterClient || PhotonNetwork.CurrentRoom == null)
@@ -557,7 +642,7 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {
         hazardStates.Clear();
-        riseMessageShownForActors.Clear();
+        riseMessageShownForScopes.Clear();
         if (scene.name == "Airport" || scene.name == "Title")
         {
             ClearRunState(clearRoomProperties: true);
@@ -572,7 +657,7 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
 
     public override void OnJoinedRoom()
     {
-        actorStartTimes.Clear();
+        scopeStartTimes.Clear();
         ApplyRoomProperties(PhotonNetwork.CurrentRoom?.CustomProperties);
     }
 

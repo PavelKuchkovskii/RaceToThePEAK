@@ -128,7 +128,7 @@ public partial class Plugin : BaseUnityPlugin
         Log.LogInfo("Local Biome Environment Patch Applied");
 
         harmony.PatchAll(typeof(FinalHazardPatch));
-        Log.LogInfo("Personal Final Hazard Patch Applied");
+        Log.LogInfo("Scoped Final Hazard Patch Applied");
 
         Log.LogInfo($"Plugin {Name} is loaded!");
     }

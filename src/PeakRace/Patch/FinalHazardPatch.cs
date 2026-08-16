@@ -17,6 +17,11 @@ internal static class FinalHazardPatch
             return;
         }
 
+        if (FinalHazardController.UsesVanillaGlobalHazard)
+        {
+            return;
+        }
+
         foreach (LavaRising hazard in LavaRising.ALL_LAVA)
         {
             if (!FinalHazardController.IsManagedFinalHazard(hazard))
@@ -43,14 +48,16 @@ internal static class FinalHazardPatch
     [HarmonyPrefix]
     private static bool IgnoreVanillaFinalHazardRpc(LavaRising __instance)
     {
-        return !FinalHazardController.IsManagedFinalHazard(__instance);
+        return FinalHazardController.UsesVanillaGlobalHazard
+            || !FinalHazardController.IsManagedFinalHazard(__instance);
     }
 
     [HarmonyPatch(typeof(LavaRising), nameof(LavaRising.RecieveLavaData))]
     [HarmonyPrefix]
     private static bool IgnoreVanillaFinalHazardPackage(LavaRising __instance)
     {
-        return !FinalHazardController.IsManagedFinalHazard(__instance);
+        return FinalHazardController.UsesVanillaGlobalHazard
+            || !FinalHazardController.IsManagedFinalHazard(__instance);
     }
 
     [HarmonyPatch(typeof(Lava), "Update")]
