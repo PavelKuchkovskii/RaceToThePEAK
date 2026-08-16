@@ -15,6 +15,13 @@ internal enum RespawnMode
     Pvp = 3
 }
 
+internal enum CampfireWaitMode
+{
+    Nobody = 0,
+    Team = 1,
+    Lobby = 2
+}
+
 internal enum PvpDeathRespawnMode
 {
     PreviousCampfire = 0,
@@ -25,7 +32,8 @@ internal enum PvpDeathRespawnMode
 internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
 {
     internal static readonly RaceSettingsSnapshot Defaults = new(
-        RespawnMode.NextCampfire,
+        CampfireWaitMode.Nobody,
+        RespawnMode.PreviousCampfire,
         nextCampfirePenaltyMinutes: 5,
         corpsePenaltyMinutes: 5,
         previousCampfirePenaltyMinutes: 0,
@@ -36,6 +44,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         pvpChestRefreshSeconds: 300);
 
     internal RaceSettingsSnapshot(
+        CampfireWaitMode waitMode,
         RespawnMode mode,
         int nextCampfirePenaltyMinutes,
         int corpsePenaltyMinutes,
@@ -46,17 +55,38 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         bool pvpChestRefreshEnabled,
         int pvpChestRefreshSeconds)
     {
-        Mode = mode;
+        WaitMode = Enum.IsDefined(typeof(CampfireWaitMode), waitMode)
+            ? waitMode
+            : CampfireWaitMode.Nobody;
+        Mode = Enum.IsDefined(typeof(RespawnMode), mode)
+            ? mode
+            : RespawnMode.PreviousCampfire;
         NextCampfirePenaltyMinutes = Mathf.Clamp(nextCampfirePenaltyMinutes, 0, 60);
         CorpsePenaltyMinutes = Mathf.Clamp(corpsePenaltyMinutes, 0, 60);
         PreviousCampfirePenaltyMinutes = Mathf.Clamp(previousCampfirePenaltyMinutes, 0, 60);
         PvpPenaltyMinutes = Mathf.Clamp(pvpPenaltyMinutes, 0, 60);
         CorpseRespawnDelaySeconds = Mathf.Clamp(corpseRespawnDelaySeconds, 0, 600);
-        PvpDeathRespawn = pvpDeathRespawn;
+        PvpDeathRespawn = Enum.IsDefined(typeof(PvpDeathRespawnMode), pvpDeathRespawn)
+            ? pvpDeathRespawn
+            : PvpDeathRespawnMode.PreviousCampfire;
+
+        // A room snapshot is a security boundary: never allow a malformed or
+        // legacy network value to move a player forward through an unearned fire.
+        if (WaitMode == CampfireWaitMode.Nobody && Mode == RespawnMode.NextCampfire)
+        {
+            Mode = RespawnMode.PreviousCampfire;
+        }
+        if (WaitMode == CampfireWaitMode.Nobody
+            && Mode == RespawnMode.Pvp
+            && PvpDeathRespawn == PvpDeathRespawnMode.NextCampfire)
+        {
+            PvpDeathRespawn = PvpDeathRespawnMode.PreviousCampfire;
+        }
         PvpChestRefreshEnabled = pvpChestRefreshEnabled;
         PvpChestRefreshSeconds = Mathf.Clamp(pvpChestRefreshSeconds, 30, 1800);
     }
 
+    internal CampfireWaitMode WaitMode { get; }
     internal RespawnMode Mode { get; }
     internal int NextCampfirePenaltyMinutes { get; }
     internal int CorpsePenaltyMinutes { get; }
@@ -83,6 +113,23 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         || (Mode == RespawnMode.Pvp
             && PvpDeathRespawn == PvpDeathRespawnMode.PreviousCampfire);
 
+    internal bool UsesIndividualCampfireProgress => WaitMode == CampfireWaitMode.Nobody;
+
+    internal bool UsesTeamCampfireProgress => WaitMode == CampfireWaitMode.Team;
+
+    internal bool UsesLobbyCampfireProgress => WaitMode == CampfireWaitMode.Lobby;
+
+    internal static bool IsCombinationAllowed(
+        CampfireWaitMode waitMode,
+        RespawnMode mode,
+        PvpDeathRespawnMode pvpDeathRespawn)
+    {
+        return waitMode != CampfireWaitMode.Nobody
+            || (mode != RespawnMode.NextCampfire
+                && (mode != RespawnMode.Pvp
+                    || pvpDeathRespawn != PvpDeathRespawnMode.NextCampfire));
+    }
+
     internal int GetPenaltyMinutes(RespawnMode mode)
     {
         return mode switch
@@ -96,7 +143,8 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
 
     public bool Equals(RaceSettingsSnapshot other)
     {
-        return Mode == other.Mode
+        return WaitMode == other.WaitMode
+            && Mode == other.Mode
             && NextCampfirePenaltyMinutes == other.NextCampfirePenaltyMinutes
             && CorpsePenaltyMinutes == other.CorpsePenaltyMinutes
             && PreviousCampfirePenaltyMinutes == other.PreviousCampfirePenaltyMinutes
@@ -116,7 +164,8 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
     {
         unchecked
         {
-            int hash = (int)Mode;
+            int hash = (int)WaitMode;
+            hash = (hash * 397) ^ (int)Mode;
             hash = (hash * 397) ^ NextCampfirePenaltyMinutes;
             hash = (hash * 397) ^ CorpsePenaltyMinutes;
             hash = (hash * 397) ^ PreviousCampfirePenaltyMinutes;
@@ -136,8 +185,9 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
 /// </summary>
 internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 {
-    private const int NetworkSchemaVersion = 4;
+    private const int NetworkSchemaVersion = 5;
     private const string VersionKey = "RTP.SettingsVersion";
+    private const string WaitModeKey = "RTP.CampfireWaitMode";
     private const string ModeKey = "RTP.RespawnMode";
     private const string NextPenaltyKey = "RTP.NextPenaltyMinutes";
     private const string CorpsePenaltyKey = "RTP.CorpsePenaltyMinutes";
@@ -148,6 +198,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     private const string PvpChestRefreshEnabledKey = "RTP.PvpChestRefreshEnabled";
     private const string PvpChestRefreshSecondsKey = "RTP.PvpChestRefreshSeconds";
 
+    private ConfigEntry<CampfireWaitMode> waitModeConfig;
     private ConfigEntry<RespawnMode> modeConfig;
     private ConfigEntry<int> nextPenaltyConfig;
     private ConfigEntry<int> corpsePenaltyConfig;
@@ -158,6 +209,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     private ConfigEntry<bool> pvpChestRefreshEnabledConfig;
     private ConfigEntry<int> pvpChestRefreshSecondsConfig;
     private bool initialized;
+    private bool normalizingLocalConfig;
     private RaceSettingsSnapshot current = RaceSettingsSnapshot.Defaults;
 
     internal static RaceSettingsManager Instance { get; private set; }
@@ -185,10 +237,16 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 
     internal void Initialize(ConfigFile config)
     {
+        waitModeConfig = config.Bind(
+            "Progression",
+            "CampfireWaitMode",
+            CampfireWaitMode.Nobody,
+            "Who must reach a campfire before the next biome can be entered: nobody, the player's team, or the whole lobby.");
+
         modeConfig = config.Bind(
             "Respawn",
             "Mode",
-            RespawnMode.NextCampfire,
+            RespawnMode.PreviousCampfire,
             "Respawn strategy selected by the lobby host.");
 
         nextPenaltyConfig = BindMinutes(
@@ -243,6 +301,9 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
                 "Delay before an opened PVP luggage chest can be opened for new loot.",
                 new AcceptableValueRange<int>(30, 1800)));
 
+        NormalizeLocalConfig(logWarning: true);
+
+        waitModeConfig.SettingChanged += OnLocalConfigChanged;
         modeConfig.SettingChanged += OnLocalConfigChanged;
         nextPenaltyConfig.SettingChanged += OnLocalConfigChanged;
         corpsePenaltyConfig.SettingChanged += OnLocalConfigChanged;
@@ -284,12 +345,63 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             new ConfigDescription(description, new AcceptableValueRange<int>(0, 60)));
     }
 
-    internal void SetMode(RespawnMode mode)
+    internal bool SetWaitMode(CampfireWaitMode waitMode)
     {
-        if (CanEditLobbySettings)
+        if (!CanEditLobbySettings
+            || !Enum.IsDefined(typeof(CampfireWaitMode), waitMode)
+            || !RaceSettingsSnapshot.IsCombinationAllowed(
+                waitMode,
+                modeConfig.Value,
+                pvpDeathRespawnConfig.Value))
         {
-            modeConfig.Value = mode;
+            return false;
         }
+
+        waitModeConfig.Value = waitMode;
+        return true;
+    }
+
+    internal bool SetMode(RespawnMode mode)
+    {
+        if (!CanEditLobbySettings
+            || !Enum.IsDefined(typeof(RespawnMode), mode)
+            || !RaceSettingsSnapshot.IsCombinationAllowed(
+                waitModeConfig.Value,
+                mode,
+                pvpDeathRespawnConfig.Value))
+        {
+            return false;
+        }
+
+        modeConfig.Value = mode;
+        return true;
+    }
+
+    internal bool CanSelectWaitMode(CampfireWaitMode waitMode)
+    {
+        return Enum.IsDefined(typeof(CampfireWaitMode), waitMode)
+            && RaceSettingsSnapshot.IsCombinationAllowed(
+                waitMode,
+                current.Mode,
+                current.PvpDeathRespawn);
+    }
+
+    internal bool CanSelectRespawnMode(RespawnMode mode)
+    {
+        return Enum.IsDefined(typeof(RespawnMode), mode)
+            && RaceSettingsSnapshot.IsCombinationAllowed(
+                current.WaitMode,
+                mode,
+                current.PvpDeathRespawn);
+    }
+
+    internal bool CanSelectPvpDeathRespawn(PvpDeathRespawnMode mode)
+    {
+        return Enum.IsDefined(typeof(PvpDeathRespawnMode), mode)
+            && RaceSettingsSnapshot.IsCombinationAllowed(
+                current.WaitMode,
+                current.Mode,
+                mode);
     }
 
     internal void AdjustPenalty(RespawnMode mode, int deltaMinutes)
@@ -319,11 +431,24 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 
     internal void CyclePvpDeathRespawn()
     {
-        if (CanEditLobbySettings)
+        if (!CanEditLobbySettings)
         {
-            pvpDeathRespawnConfig.Value = (PvpDeathRespawnMode)(
-                ((int)pvpDeathRespawnConfig.Value + 1)
-                % Enum.GetValues(typeof(PvpDeathRespawnMode)).Length);
+            return;
+        }
+
+        int optionCount = Enum.GetValues(typeof(PvpDeathRespawnMode)).Length;
+        for (int offset = 1; offset <= optionCount; offset++)
+        {
+            PvpDeathRespawnMode candidate = (PvpDeathRespawnMode)(
+                ((int)pvpDeathRespawnConfig.Value + offset) % optionCount);
+            if (RaceSettingsSnapshot.IsCombinationAllowed(
+                waitModeConfig.Value,
+                modeConfig.Value,
+                candidate))
+            {
+                pvpDeathRespawnConfig.Value = candidate;
+                return;
+            }
         }
     }
 
@@ -348,11 +473,12 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 
     private void OnLocalConfigChanged(object sender, EventArgs eventArgs)
     {
-        if (!initialized)
+        if (!initialized || normalizingLocalConfig)
         {
             return;
         }
 
+        NormalizeLocalConfig(logWarning: true);
         RaceSettingsSnapshot local = ReadLocalConfig();
         if (!PhotonNetwork.InRoom)
         {
@@ -367,6 +493,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     private RaceSettingsSnapshot ReadLocalConfig()
     {
         return new RaceSettingsSnapshot(
+            waitModeConfig.Value,
             modeConfig.Value,
             nextPenaltyConfig.Value,
             corpsePenaltyConfig.Value,
@@ -376,6 +503,64 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             pvpDeathRespawnConfig.Value,
             pvpChestRefreshEnabledConfig.Value,
             pvpChestRefreshSecondsConfig.Value);
+    }
+
+    private void NormalizeLocalConfig(bool logWarning)
+    {
+        CampfireWaitMode waitMode = Enum.IsDefined(
+            typeof(CampfireWaitMode),
+            waitModeConfig.Value)
+            ? waitModeConfig.Value
+            : CampfireWaitMode.Nobody;
+        RespawnMode mode = Enum.IsDefined(typeof(RespawnMode), modeConfig.Value)
+            ? modeConfig.Value
+            : RespawnMode.PreviousCampfire;
+        PvpDeathRespawnMode pvpDeathRespawn = Enum.IsDefined(
+            typeof(PvpDeathRespawnMode),
+            pvpDeathRespawnConfig.Value)
+            ? pvpDeathRespawnConfig.Value
+            : PvpDeathRespawnMode.PreviousCampfire;
+
+        bool changed = waitMode != waitModeConfig.Value
+            || mode != modeConfig.Value
+            || pvpDeathRespawn != pvpDeathRespawnConfig.Value;
+        if (!RaceSettingsSnapshot.IsCombinationAllowed(waitMode, mode, pvpDeathRespawn))
+        {
+            if (mode == RespawnMode.NextCampfire)
+            {
+                mode = RespawnMode.PreviousCampfire;
+            }
+            if (mode == RespawnMode.Pvp
+                && pvpDeathRespawn == PvpDeathRespawnMode.NextCampfire)
+            {
+                pvpDeathRespawn = PvpDeathRespawnMode.PreviousCampfire;
+            }
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        if (logWarning)
+        {
+            Plugin.Log.LogWarning(
+                "Normalized incompatible or invalid local race settings to a safe combination: "
+                + $"wait {waitMode}, respawn {mode}, PVP real death {pvpDeathRespawn}.");
+        }
+
+        normalizingLocalConfig = true;
+        try
+        {
+            waitModeConfig.Value = waitMode;
+            modeConfig.Value = mode;
+            pvpDeathRespawnConfig.Value = pvpDeathRespawn;
+        }
+        finally
+        {
+            normalizingLocalConfig = false;
+        }
     }
 
     private void Publish(RaceSettingsSnapshot snapshot)
@@ -389,6 +574,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         Hashtable properties = new()
         {
             [VersionKey] = NetworkSchemaVersion,
+            [WaitModeKey] = (int)snapshot.WaitMode,
             [ModeKey] = (int)snapshot.Mode,
             [NextPenaltyKey] = snapshot.NextCampfirePenaltyMinutes,
             [CorpsePenaltyKey] = snapshot.CorpsePenaltyMinutes,
@@ -405,7 +591,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             return;
         }
         Plugin.Log.LogInfo(
-            $"Published lobby respawn settings: {snapshot.Mode}, "
+            $"Published lobby race settings: wait {snapshot.WaitMode}, respawn {snapshot.Mode}, "
             + $"penalty {snapshot.ActivePenaltyMinutes}m, corpse delay {snapshot.CorpseRespawnDelaySeconds}s, "
             + $"PVP real death {snapshot.PvpDeathRespawn}, "
             + $"PVP chest refresh {(snapshot.PvpChestRefreshEnabled ? $"{snapshot.PvpChestRefreshSeconds}s" : "off")}.");
@@ -416,7 +602,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         Hashtable properties = PhotonNetwork.CurrentRoom?.CustomProperties;
         if (properties == null
             || !TryReadInt(properties, VersionKey, out int version)
-            || version != NetworkSchemaVersion
+            || (version != 4 && version != NetworkSchemaVersion)
             || !TryReadInt(properties, ModeKey, out int mode)
             || !TryReadInt(properties, NextPenaltyKey, out int nextPenalty)
             || !TryReadInt(properties, CorpsePenaltyKey, out int corpsePenalty)
@@ -430,15 +616,26 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             return false;
         }
 
+        int waitMode = (int)CampfireWaitMode.Nobody;
+        if (version == NetworkSchemaVersion
+            && !TryReadInt(properties, WaitModeKey, out waitMode))
+        {
+            return false;
+        }
+
         RespawnMode parsedMode = Enum.IsDefined(typeof(RespawnMode), mode)
             ? (RespawnMode)mode
-            : RespawnMode.NextCampfire;
+            : RespawnMode.PreviousCampfire;
+        CampfireWaitMode parsedWaitMode = Enum.IsDefined(typeof(CampfireWaitMode), waitMode)
+            ? (CampfireWaitMode)waitMode
+            : CampfireWaitMode.Nobody;
         PvpDeathRespawnMode parsedPvpDeathRespawn = Enum.IsDefined(
             typeof(PvpDeathRespawnMode),
             pvpDeathRespawn)
             ? (PvpDeathRespawnMode)pvpDeathRespawn
             : PvpDeathRespawnMode.PreviousCampfire;
-        SetCurrent(new RaceSettingsSnapshot(
+        RaceSettingsSnapshot snapshot = new(
+            parsedWaitMode,
             parsedMode,
             nextPenalty,
             corpsePenalty,
@@ -447,7 +644,21 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             corpseDelay,
             parsedPvpDeathRespawn,
             chestRefreshEnabled,
-            chestRefreshSeconds));
+            chestRefreshSeconds);
+        if (version != NetworkSchemaVersion
+            || parsedWaitMode != (CampfireWaitMode)waitMode
+            || parsedMode != (RespawnMode)mode
+            || parsedPvpDeathRespawn != (PvpDeathRespawnMode)pvpDeathRespawn
+            || snapshot.WaitMode != parsedWaitMode
+            || snapshot.Mode != parsedMode
+            || snapshot.PvpDeathRespawn != parsedPvpDeathRespawn)
+        {
+            Plugin.Log.LogWarning(
+                $"Migrated room race settings schema {version} to safe local rules: "
+                + $"wait {snapshot.WaitMode}, respawn {snapshot.Mode}, "
+                + $"PVP real death {snapshot.PvpDeathRespawn}.");
+        }
+        SetCurrent(snapshot);
         return true;
     }
 
@@ -498,7 +709,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 
         current = snapshot;
         Plugin.Log.LogInfo(
-            $"Using lobby respawn settings: {snapshot.Mode}, "
+            $"Using lobby race settings: wait {snapshot.WaitMode}, respawn {snapshot.Mode}, "
             + $"penalty {snapshot.ActivePenaltyMinutes}m, corpse delay {snapshot.CorpseRespawnDelaySeconds}s, "
             + $"PVP real death {snapshot.PvpDeathRespawn}, "
             + $"PVP chest refresh {(snapshot.PvpChestRefreshEnabled ? $"{snapshot.PvpChestRefreshSeconds}s" : "off")}.");
@@ -525,6 +736,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     {
         if (initialized
             && (propertiesThatChanged.ContainsKey(VersionKey)
+                || propertiesThatChanged.ContainsKey(WaitModeKey)
                 || propertiesThatChanged.ContainsKey(ModeKey)
                 || propertiesThatChanged.ContainsKey(NextPenaltyKey)
                 || propertiesThatChanged.ContainsKey(CorpsePenaltyKey)
@@ -560,6 +772,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     {
         if (initialized)
         {
+            waitModeConfig.SettingChanged -= OnLocalConfigChanged;
             modeConfig.SettingChanged -= OnLocalConfigChanged;
             nextPenaltyConfig.SettingChanged -= OnLocalConfigChanged;
             corpsePenaltyConfig.SettingChanged -= OnLocalConfigChanged;
