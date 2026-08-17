@@ -199,9 +199,15 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
                 || localProgress >= requiredCampfire;
             bool shouldBlock = !hasAccess;
 
+            // MapHandler has globally loaded this transition, so its source-side
+            // wall must stay open. Re-enabling it for a lagging player can place
+            // the wall before the campfire and make the required interaction
+            // physically unreachable. The destination-side wall is the local
+            // access gate: it still prevents entering the next biome until this
+            // player/team has completed the already-lit checkpoint.
             SetActiveIfDifferent(
                 map.segments[destinationSegment - 1].wallNext,
-                shouldBlock);
+                false);
             SetActiveIfDifferent(
                 map.segments[destinationSegment].wallPrevious,
                 shouldBlock);
