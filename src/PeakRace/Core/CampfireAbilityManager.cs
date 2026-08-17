@@ -143,7 +143,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             "MegaLaunchForce",
             75f,
             new ConfigDescription(
-                "Physical acceleration impulse applied by Mega Launch.",
+                "Launch power converted into a direct, mass-independent velocity change.",
                 new AcceptableValueRange<float>(10f, 250f)));
         megaFoodLeaderChanceConfig = BindMegaFoodChance(
             config,

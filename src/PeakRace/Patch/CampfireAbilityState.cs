@@ -18,6 +18,7 @@ namespace PeakRace.Patch;
 internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 {
     private const float MegaLaunchVelocityScale = 0.2f;
+    private const float MegaLaunchRagdollSeconds = 3f;
 
     private static readonly CharacterAfflictions.STATUSTYPE[]
         SecondWindTemporaryStatuses =
@@ -283,30 +284,92 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         }
 
         StartCoroutine(MaintainMegaLaunchProtection());
+
+        // PEAK's own scout cannon disables active ragdoll control before
+        // launching. Without this transition, standing and movement forces can
+        // absorb an impulse while the character is still touching the ground.
+        character.data.launchedByCannon = true;
+        character.RPCA_Fall(MegaLaunchRagdollSeconds, 0f);
         if (!photonView.IsMine)
         {
             return;
         }
 
         character.refs.movement.CapFallDamage(0f, 15f);
-        character.data.sinceGrounded = 0f;
-        Vector3 launchVelocity = direction.normalized
-            * force
-            * MegaLaunchVelocityScale;
+        StartCoroutine(ApplyMegaLaunchVelocity(direction, force));
+    }
 
-        // Character.AddForce uses ForceMode.Acceleration. Applied for only one
-        // physics step, the configured default of 75 changes velocity by about
-        // 1.5 m/s and is immediately lost to grounded movement. A synchronized
-        // velocity change is frame-rate independent and moves every owned
-        // ragdoll part by the same amount without tearing the character apart.
+    private IEnumerator ApplyMegaLaunchVelocity(Vector3 direction, float force)
+    {
+        // Let Character.FixedUpdate observe fallSeconds and release active
+        // ragdoll control before changing velocity.
+        yield return new WaitForFixedUpdate();
+
+        if (character == null || character.data == null || character.data.dead)
+        {
+            yield break;
+        }
+
+        Vector3 safeDirection = direction;
+        if (!IsFinite(safeDirection) || safeDirection.sqrMagnitude <= 0.01f)
+        {
+            safeDirection = character.data.lookDirection;
+        }
+        if (!IsFinite(safeDirection) || safeDirection.sqrMagnitude <= 0.01f)
+        {
+            safeDirection = Vector3.forward;
+        }
+        safeDirection.Normalize();
+        float safeForce = float.IsNaN(force) || float.IsInfinity(force)
+            ? 75f
+            : Mathf.Clamp(force, 10f, 250f);
+        Vector3 launchVelocity = safeDirection
+            * safeForce
+            * MegaLaunchVelocityScale;
+        int acceleratedBodies = 0;
+
+        // Bodypart.AddForce does not preserve its ForceMode argument in PEAK
+        // 2.0: it buffers the vector and later always applies ForceMode.Force.
+        // Apply VelocityChange to the owned rigidbodies directly so the launch
+        // is instantaneous, mass-independent and cannot collapse into a tiny
+        // one-frame push.
         foreach (Bodypart bodypart in character.refs.ragdoll.partList)
         {
-            bodypart?.AddForce(launchVelocity, ForceMode.VelocityChange);
+            Rigidbody body = bodypart?.Rig;
+            if (body == null || body.isKinematic)
+            {
+                continue;
+            }
+
+            body.WakeUp();
+            body.AddForce(launchVelocity, ForceMode.VelocityChange);
+            acceleratedBodies++;
+        }
+
+        if (acceleratedBodies == 0)
+        {
+            Plugin.Log.LogError(
+                $"Mega Launch could not find a dynamic body for {character.characterName}.");
+            CampfireAbilityManager.Instance?.ShowFeedback(
+                "MEGA LAUNCH FAILED  •  NO DYNAMIC BODY",
+                Color.red);
+            yield break;
         }
 
         Plugin.Log.LogInfo(
             $"Applied Mega Launch to {character.characterName}: "
-            + $"velocity {launchVelocity.magnitude:0.##} m/s.");
+            + $"velocity {launchVelocity.magnitude:0.##} m/s across "
+            + $"{acceleratedBodies} bodies.");
+    }
+
+    private bool IsFinite(Vector3 value)
+    {
+        return !float.IsNaN(value.x)
+            && !float.IsInfinity(value.x)
+            && !float.IsNaN(value.y)
+            && !float.IsInfinity(value.y)
+            && !float.IsNaN(value.z)
+            && !float.IsInfinity(value.z);
     }
 
     private IEnumerator MaintainMegaLaunchProtection()

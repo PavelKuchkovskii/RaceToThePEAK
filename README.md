@@ -90,7 +90,7 @@ Weights are relative rather than percentages. Setting a weight to `0` disables t
 | **Recall** | Active, one use | 10 | After a warning, returns the living leader to their previous campfire when the lead is at least one checkpoint or otherwise large enough. |
 | **Chaos Horn** | Active, one use | 10 | Removes bonus stamina from every other living non-ghost racer. This is a main ability, not the separate Chaos slot. |
 | **Ghost Runner** | Active, one use | 8 | While the owner is a ghost, increases the spectated living target's stamina use by 20% for 15 seconds. |
-| **Mega Launch** | Active, reusable | 12 | After a five-second countdown, launches the owner in their current look direction. Force and cooldown are host-configurable. |
+| **Mega Launch** | Active, reusable | 12 | After a five-second countdown, ragdolls and throws the owner in their current look direction. Launch velocity and cooldown are host-configurable. |
 
 ### Chaos effects
 
