@@ -14,7 +14,7 @@
 * Added one synchronized random starting ability for every racer in PVP, using the same configured weights as campfire rewards. Starting grants persist across host migration and do not include Chaos.
 * Added an optional PVP Test mode, disabled by default. Its host-only in-run controls can reroll every active player's main Ability or grant one Chaos charge to every active player without restarting the run.
 * Made Shield consume itself to protect its owner from Chaos Horn without removing their bonus stamina.
-* Reworked transition access so lagging clients keep PEAK's oversized future-biome seal open until they claim the previous fire. No custom world-sized collider is created; the master client corrects only a confirmed bypass beyond the campfire's protected approach area.
+* Reworked transition access so lagging clients keep PEAK's oversized future-biome seal open until they claim the previous fire. No custom world-sized collider is created; the master client now corrects an unclaimed racer immediately beyond PEAK's destination progress plane without blocking the campfire approach.
 * Fixed first-biome race scores so directed abilities such as Exhaust can identify racers ahead while the user is still on the beach.
 * Fixed Mega Launch for PEAK 2.0: it uses the owner's camera direction, enters the game's cannon-style ragdoll state, then applies a direct mass-independent velocity change to every owned body instead of PEAK's force buffer, which discards the requested force mode.
 

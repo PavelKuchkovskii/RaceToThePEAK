@@ -16,8 +16,7 @@ namespace PeakRace.Core;
 internal sealed class ScopedTransitionAccessController
 {
     private const float CorrectionCooldownSeconds = 0.75f;
-    private const float CampfireExitPadding = 10f;
-    private const float CampfireAltitudeTolerance = 12f;
+    private const float ForwardBoundaryPadding = 1f;
 
     private readonly Dictionary<int, TransitionBoundary> boundaries = new();
     private readonly Dictionary<int, TransitionSafePosition> safePositions = new();
@@ -189,7 +188,7 @@ internal sealed class ScopedTransitionAccessController
 
         Vector3 campfirePosition = campfire.transform.position;
         float forwardPosition = campfirePosition.z
-            + Mathf.Max(5f, campfire.moraleBoostRadius + 2f);
+            + Mathf.Max(3f, campfire.moraleBoostRadius + 1f);
 
         MountainProgressHandler progressHandler =
             Singleton<MountainProgressHandler>.Instance;
@@ -200,18 +199,14 @@ internal sealed class ScopedTransitionAccessController
             && destinationSegment < points.Length
             && points[destinationSegment]?.transform != null)
         {
-            forwardPosition = Mathf.Max(
-                forwardPosition,
-                points[destinationSegment].transform.position.z);
+            // PEAK uses this forward plane to recognize entry into the
+            // destination biome. Reusing it with a one-metre safety margin
+            // keeps access, environment, scoring, and retention aligned.
+            forwardPosition = points[destinationSegment].transform.position.z
+                + ForwardBoundaryPadding;
         }
 
-        float exitRadius = Mathf.Max(1f, campfire.moraleBoostRadius)
-            + CampfireExitPadding;
-        boundary = new TransitionBoundary(
-            forwardPosition,
-            campfirePosition.y - CampfireAltitudeTolerance,
-            campfirePosition,
-            exitRadius * exitRadius);
+        boundary = new TransitionBoundary(forwardPosition);
         return true;
     }
 
@@ -249,10 +244,7 @@ internal sealed class ScopedTransitionAccessController
                 return false;
             }
 
-            bool clearlyPastCampfire = position.z > boundary.ForwardPosition
-                && position.y >= boundary.MinimumAltitude
-                && (position - boundary.CampfirePosition).sqrMagnitude
-                    > boundary.ExitRadiusSquared;
+            bool clearlyPastCampfire = position.z > boundary.ForwardPosition;
             if (!clearlyPastCampfire)
             {
                 break;
@@ -389,22 +381,12 @@ internal sealed class ScopedTransitionAccessController
 
     private readonly struct TransitionBoundary
     {
-        internal TransitionBoundary(
-            float forwardPosition,
-            float minimumAltitude,
-            Vector3 campfirePosition,
-            float exitRadiusSquared)
+        internal TransitionBoundary(float forwardPosition)
         {
             ForwardPosition = forwardPosition;
-            MinimumAltitude = minimumAltitude;
-            CampfirePosition = campfirePosition;
-            ExitRadiusSquared = exitRadiusSquared;
         }
 
         internal float ForwardPosition { get; }
-        internal float MinimumAltitude { get; }
-        internal Vector3 CampfirePosition { get; }
-        internal float ExitRadiusSquared { get; }
     }
 
     private readonly struct TransitionSafePosition
