@@ -31,6 +31,11 @@ internal static class PvpChestRefreshPatch
                 typeof(PvpChestRefreshPatch),
                 nameof(BeforeConsumeAction)));
         harmony.Patch(
+            AccessTools.Method(typeof(Action_ReduceUses), nameof(Action_ReduceUses.RunAction)),
+            prefix: new HarmonyMethod(
+                typeof(PvpChestRefreshPatch),
+                nameof(BeforeReduceUsesAction)));
+        harmony.Patch(
             AccessTools.Method(typeof(Item), "OnDestroy"),
             prefix: new HarmonyMethod(
                 typeof(PvpChestRefreshPatch),
@@ -73,12 +78,21 @@ internal static class PvpChestRefreshPatch
     // deactivate or destroy the marked object.
     private static void BeforeConsumeAction(Action_Consume __instance)
     {
-        Item item = __instance != null
-            ? __instance.GetComponent<Item>()
-            : null;
-        RequestHiddenMegaLaunchFoodConsumption(
-            item,
-            item?.holderCharacter);
+        RequestFromItemAction(__instance);
+    }
+
+    // Multi-use food runs Action_ReduceUses for every completed bite and only
+    // reaches Action_Consume after its final portion. Hidden food must reveal
+    // itself on the first completed bite, not when the empty wrapper vanishes.
+    private static void BeforeReduceUsesAction(Action_ReduceUses __instance)
+    {
+        RequestFromItemAction(__instance);
+    }
+
+    private static void RequestFromItemAction(ItemActionBase action)
+    {
+        Item item = action != null ? action.GetComponent<Item>() : null;
+        RequestHiddenMegaLaunchFoodConsumption(item, item?.holderCharacter);
     }
 
     private static void RequestHiddenMegaLaunchFoodConsumption(
