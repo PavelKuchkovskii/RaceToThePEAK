@@ -4,6 +4,7 @@ using PeakRace.Core;
 using Photon.Pun;
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace PeakRace.Patch;
@@ -16,6 +17,16 @@ namespace PeakRace.Patch;
 [HarmonyPatch]
 internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 {
+    private static readonly CharacterAfflictions.STATUSTYPE[]
+        SecondWindTemporaryStatuses =
+        {
+            CharacterAfflictions.STATUSTYPE.Cold,
+            CharacterAfflictions.STATUSTYPE.Hot,
+            CharacterAfflictions.STATUSTYPE.Poison,
+            CharacterAfflictions.STATUSTYPE.Spores,
+            CharacterAfflictions.STATUSTYPE.Drowsy
+        };
+
     private Character character;
 
     [HarmonyPatch(typeof(Character), nameof(Character.Awake))]
@@ -386,10 +397,14 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             yield break;
         }
 
-        // Remove only enough curable status to make ordinary unconscious
-        // recovery valid. Persistent equipment weight and petrification are
-        // deliberately not bypassed.
-        float excess = Mathf.Max(0f, character.refs.afflictions.statusSum - 0.95f);
+        CharacterAfflictions afflictions = character.refs.afflictions;
+        ClearSecondWindTemporaryEffects(afflictions);
+
+        // Second Wind remains a reliable ordinary recovery even when a small
+        // amount of injury or hunger also contributed to the knockout. Reduce
+        // only the remaining amount required to wake up, using PEAK's own
+        // curability policy so persistent conditions are never removed.
+        float excess = Mathf.Max(0f, afflictions.statusSum - 0.95f);
         foreach (CharacterAfflictions.STATUSTYPE status in
             Enum.GetValues(typeof(CharacterAfflictions.STATUSTYPE)))
         {
@@ -397,24 +412,24 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             {
                 break;
             }
-            if (status is CharacterAfflictions.STATUSTYPE.Weight
-                or CharacterAfflictions.STATUSTYPE.Thorns
-                or CharacterAfflictions.STATUSTYPE.Arrow
-                or CharacterAfflictions.STATUSTYPE.Petrify)
+            if (!afflictions.StatusIsCurable(
+                status,
+                isCurseCurable: false,
+                isPetrifyCurable: false))
             {
                 continue;
             }
 
-            float current = character.refs.afflictions.GetCurrentStatus(status);
+            float current = afflictions.GetCurrentStatus(status);
             float reduction = Mathf.Min(current, excess);
             if (reduction > 0f)
             {
-                character.refs.afflictions.SubtractStatus(status, reduction);
+                afflictions.SubtractStatus(status, reduction);
                 excess -= reduction;
             }
         }
 
-        if (character.refs.afflictions.statusSum >= 1f)
+        if (afflictions.statusSum >= 1f)
         {
             yield break;
         }
@@ -422,6 +437,59 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         character.data.passOutValue = 0f;
         character.data.deathTimer = 0f;
         photonView.RPC("RPCA_UnPassOut", RpcTarget.All);
+    }
+
+    private static void ClearSecondWindTemporaryEffects(
+        CharacterAfflictions afflictions)
+    {
+        // Remove harmful over-time sources before clearing their accumulated
+        // status. Beneficial warming/sedation-recovery effects and the persistent
+        // Zombie Bite mechanic are deliberately retained.
+        bool removedAffliction = false;
+        foreach (Affliction affliction in
+            new List<Affliction>(afflictions.afflictionList))
+        {
+            bool isHarmfulTemporarySource = affliction switch
+            {
+                Affliction_PoisonOverTime poison => poison.statusPerSecond > 0f,
+                Affliction_AdjustColdOverTime cold => cold.statusPerSecond > 0f,
+                Affliction_AdjustDrowsyOverTime drowsy => drowsy.statusPerSecond > 0f,
+                _ => false
+            };
+            if (!isHarmfulTemporarySource)
+            {
+                continue;
+            }
+
+            afflictions.RemoveAffliction(
+                affliction,
+                fromRPC: false,
+                pushAfflictions: false);
+            removedAffliction = true;
+        }
+
+        if (removedAffliction)
+        {
+            afflictions.PushAfflictions(null, -1);
+        }
+
+        bool clearedStatus = false;
+        foreach (CharacterAfflictions.STATUSTYPE status in
+            SecondWindTemporaryStatuses)
+        {
+            if (afflictions.GetCurrentStatus(status) <= 0f)
+            {
+                continue;
+            }
+
+            afflictions.SetStatus(status, 0f, pushStatus: false);
+            clearedStatus = true;
+        }
+
+        if (clearedStatus)
+        {
+            afflictions.PushStatuses(null);
+        }
     }
 
     [PunRPC]

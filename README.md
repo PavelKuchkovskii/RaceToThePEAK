@@ -85,7 +85,7 @@ Weights are relative rather than percentages. Setting a weight to `0` disables t
 | **Adrenaline** | Active, one use | 12 | Applies the original Lollipop and Energy Drink effects together. |
 | **Shield** | Passive, one block | 12 | Blocks and consumes itself against the next directed Exhaust, Recall or Ghost Runner. |
 | **Exhaust** | Active, one use | 12 | Targets a random racer ahead and increases their stamina use by 40% for 8 seconds. It is not consumed when no valid target exists. |
-| **Second Wind** | Passive, one recovery | 12 | Automatically recovers the owner from the next ordinary unconscious state and grants 2 seconds of protection. |
+| **Second Wind** | Passive, one recovery | 12 | Automatically recovers the owner from the next ordinary unconscious state, clears accumulated cold, heat, poison, spores and drowsiness without removing persistent conditions, and grants 2 seconds of protection. |
 | **Catch Up** | Passive while held | 12 | Improves movement, jumping, climbing and stamina recovery by 5-25% according to the gap to the leader. The last-place racer also qualifies for this gap-based aid without holding the ability. |
 | **Recall** | Active, one use | 10 | After a warning, returns the living leader to their previous campfire when the lead is at least one checkpoint or otherwise large enough. |
 | **Chaos Horn** | Active, one use | 10 | Removes bonus stamina from every other living non-ghost racer. This is a main ability, not the separate Chaos slot. |
