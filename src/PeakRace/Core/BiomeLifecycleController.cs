@@ -81,7 +81,7 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
             lastRetainedFloor = retainedFloor;
             Plugin.Log.LogInfo(
                 $"Retaining contiguous map segments {retainedFloor}..{currentSegment} "
-                + $"for {RaceSettingsManager.Current.WaitMode} waiting rules.");
+                + $"for {(RaceSettingsManager.Current.UsesPersonalCampfireClaims ? "personal PVP" : RaceSettingsManager.Current.WaitMode)} rules.");
         }
     }
 
@@ -106,7 +106,9 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;
         CampfireProgressionController progression = CampfireProgressionController.Instance;
 
-        if (settings.WaitMode == CampfireWaitMode.Team && progression != null)
+        if (!settings.UsesPersonalCampfireClaims
+            && settings.WaitMode == CampfireWaitMode.Team
+            && progression != null)
         {
             // A team that has completed fire N is still working in segment N+1.
             // This remains true even if all of its members are temporarily dead.
@@ -192,7 +194,8 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
             destinationSegment++)
         {
             int requiredCampfire = destinationSegment - 1;
-            bool hasAccess = settings.WaitMode == CampfireWaitMode.Nobody
+            bool hasAccess = !settings.UsesPersonalCampfireClaims
+                    && settings.WaitMode == CampfireWaitMode.Nobody
                 || localProgress >= requiredCampfire;
             bool shouldBlock = !hasAccess;
 

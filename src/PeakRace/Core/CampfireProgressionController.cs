@@ -93,9 +93,14 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
             return false;
         }
 
-        // Nobody mode unlocks the transition globally at the first physical
-        // activation; lagging racers never have to claim an already-lit fire.
-        return RaceSettingsManager.Current.WaitMode == CampfireWaitMode.Nobody
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (settings.UsesPersonalCampfireClaims)
+        {
+            return GetActorProgress(GetActorNumber(character)) < campfireIndex;
+        }
+
+        // Outside PVP, Nobody keeps the original global first-racer rule.
+        return settings.WaitMode == CampfireWaitMode.Nobody
             ? campfire.state == Campfire.FireState.Off
             : GetCompletedCampfireIndex(character) < campfireIndex;
     }
@@ -152,7 +157,8 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
 
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;
         int previousProgress = GetCompletedCampfireIndex(character);
-        if (settings.WaitMode != CampfireWaitMode.Nobody
+        if ((settings.UsesPersonalCampfireClaims
+                || settings.WaitMode != CampfireWaitMode.Nobody)
             && campfireIndex > previousProgress + 1)
         {
             Plugin.Log.LogWarning(
@@ -161,12 +167,15 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
             return;
         }
 
-        if (!PublishProgress(character, campfireIndex, settings.WaitMode))
+        CampfireWaitMode completionScope = settings.UsesPersonalCampfireClaims
+            ? CampfireWaitMode.Nobody
+            : settings.WaitMode;
+        if (!PublishProgress(character, campfireIndex, completionScope))
         {
             return;
         }
 
-        ResumeTimersForCompletedScope(character, settings.WaitMode);
+        ResumeTimersForCompletedScope(character, completionScope);
         RaceRespawnController.Instance?.HandleCampfireCompleted(character, campfire, campfireIndex);
 
         if (campfire.state == Campfire.FireState.Off)
@@ -176,7 +185,7 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
 
         Plugin.Log.LogInfo(
             $"{character.characterName} completed campfire {campfireIndex} "
-            + $"under {settings.WaitMode} waiting rules.");
+            + $"under {(settings.UsesPersonalCampfireClaims ? "personal PVP" : settings.WaitMode)} rules.");
     }
 
     internal int GetCompletedCampfireIndex(Character character)
@@ -186,7 +195,13 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
             return -1;
         }
 
-        return RaceSettingsManager.Current.WaitMode switch
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (settings.UsesPersonalCampfireClaims)
+        {
+            return GetActorProgress(GetActorNumber(character));
+        }
+
+        return settings.WaitMode switch
         {
             CampfireWaitMode.Team => GetTeamProgress(RaceTeamScope.ForCharacter(character)),
             CampfireWaitMode.Lobby => lobbyProgress,
@@ -218,7 +233,10 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
 
     internal IEnumerable<Character> GetActiveCharactersInScope(Character reference)
     {
-        CampfireWaitMode waitMode = RaceSettingsManager.Current.WaitMode;
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        CampfireWaitMode waitMode = settings.UsesPersonalCampfireClaims
+            ? CampfireWaitMode.Nobody
+            : settings.WaitMode;
         RaceTeamScope teamScope = RaceTeamScope.ForCharacter(reference);
         foreach (Character character in GetActivePlayerCharacters())
         {
@@ -254,6 +272,17 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
         }
 
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (settings.UsesPersonalCampfireClaims)
+        {
+            if (GetActorProgress(GetActorNumber(character)) >= campfireIndex)
+            {
+                rejectionText = "CHECKPOINT ALREADY COMPLETED";
+                return false;
+            }
+
+            return true;
+        }
+
         if (settings.WaitMode == CampfireWaitMode.Nobody)
         {
             return true;

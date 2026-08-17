@@ -38,8 +38,15 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
 
     private bool clearedOutsideRun;
 
-    private static bool UsesScopedHazards =>
-        RaceSettingsManager.Current.WaitMode != CampfireWaitMode.Lobby;
+    private static bool UsesScopedHazards
+    {
+        get
+        {
+            RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+            return settings.UsesPersonalCampfireClaims
+                || settings.WaitMode != CampfireWaitMode.Lobby;
+        }
+    }
 
     internal static bool UsesVanillaGlobalHazard => !UsesScopedHazards;
 
@@ -470,7 +477,9 @@ internal sealed class FinalHazardController : MonoBehaviourPunCallbacks
             return false;
         }
 
-        if (RaceSettingsManager.Current.WaitMode == CampfireWaitMode.Team)
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (!settings.UsesPersonalCampfireClaims
+            && settings.WaitMode == CampfireWaitMode.Team)
         {
             scopeKey = RaceTeamScope.ForCharacter(character).PropertySuffix;
             return true;

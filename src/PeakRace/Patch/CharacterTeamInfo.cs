@@ -162,8 +162,10 @@ internal class CharacterTeamInfo : MonoBehaviourPunCallbacks
                 campfireList.RemoveAt(idx);
                 // A racer arriving after somebody else advanced must keep timing.
                 // Only pause while this racer still has to activate an unlit fire.
+                RaceSettingsSnapshot settings = RaceSettingsManager.Current;
                 bool waitsForLogicalCompletion =
-                    RaceSettingsManager.Current.WaitMode != CampfireWaitMode.Nobody
+                    (settings.UsesPersonalCampfireClaims
+                        || settings.WaitMode != CampfireWaitMode.Nobody)
                     && CampfireProgressionController.Instance?.RequiresCompletion(
                         myChar,
                         campfire) == true;

@@ -76,9 +76,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         {
             Mode = RespawnMode.PreviousCampfire;
         }
-        if (WaitMode == CampfireWaitMode.Nobody
-            && Mode == RespawnMode.Pvp
-            && PvpDeathRespawn == PvpDeathRespawnMode.NextCampfire)
+        if (PvpDeathRespawn == PvpDeathRespawnMode.NextCampfire)
         {
             PvpDeathRespawn = PvpDeathRespawnMode.PreviousCampfire;
         }
@@ -115,6 +113,8 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
 
     internal bool UsesIndividualCampfireProgress => WaitMode == CampfireWaitMode.Nobody;
 
+    internal bool UsesPersonalCampfireClaims => Mode == RespawnMode.Pvp;
+
     internal bool UsesTeamCampfireProgress => WaitMode == CampfireWaitMode.Team;
 
     internal bool UsesLobbyCampfireProgress => WaitMode == CampfireWaitMode.Lobby;
@@ -124,10 +124,13 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         RespawnMode mode,
         PvpDeathRespawnMode pvpDeathRespawn)
     {
+        if (pvpDeathRespawn == PvpDeathRespawnMode.NextCampfire)
+        {
+            return false;
+        }
+
         return waitMode != CampfireWaitMode.Nobody
-            || (mode != RespawnMode.NextCampfire
-                && (mode != RespawnMode.Pvp
-                    || pvpDeathRespawn != PvpDeathRespawnMode.NextCampfire));
+            || mode != RespawnMode.NextCampfire;
     }
 
     internal int GetPenaltyMinutes(RespawnMode mode)
@@ -185,7 +188,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
 /// </summary>
 internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 {
-    private const int NetworkSchemaVersion = 5;
+    private const int NetworkSchemaVersion = 6;
     private const string VersionKey = "RTP.SettingsVersion";
     private const string WaitModeKey = "RTP.CampfireWaitMode";
     private const string ModeKey = "RTP.RespawnMode";
@@ -618,7 +621,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         Hashtable properties = PhotonNetwork.CurrentRoom?.CustomProperties;
         if (properties == null
             || !TryReadInt(properties, VersionKey, out int version)
-            || (version != 4 && version != NetworkSchemaVersion)
+            || (version < 4 || version > NetworkSchemaVersion)
             || !TryReadInt(properties, ModeKey, out int mode)
             || !TryReadInt(properties, NextPenaltyKey, out int nextPenalty)
             || !TryReadInt(properties, CorpsePenaltyKey, out int corpsePenalty)
@@ -633,7 +636,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         }
 
         int waitMode = (int)CampfireWaitMode.Nobody;
-        if (version == NetworkSchemaVersion
+        if (version >= 5
             && !TryReadInt(properties, WaitModeKey, out waitMode))
         {
             return false;

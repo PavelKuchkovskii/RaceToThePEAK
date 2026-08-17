@@ -187,6 +187,18 @@ internal sealed class RaceSettingsMenu : MenuWindow
             ref y,
             58f);
 
+        if (settings.UsesPersonalCampfireClaims)
+        {
+            DrawBody(
+                "PVP uses one fixed progression rule: every player must personally activate each campfire. "
+                + "Nobody is waited for, but an unclaimed transition remains blocked for that player.",
+                width,
+                ref y,
+                58f);
+            DrawDivider(width, ref y);
+            return;
+        }
+
         CampfireWaitMode[] options =
         {
             CampfireWaitMode.Nobody,
@@ -333,10 +345,10 @@ internal sealed class RaceSettingsMenu : MenuWindow
         if (!manager.CanSelectPvpDeathRespawn(PvpDeathRespawnMode.NextCampfire))
         {
             DrawWarning(
-                "Next fire is disabled when progression waits for nobody.",
+                "Next fire is disabled in PVP because every living player must personally claim the checkpoint.",
                 width,
                 ref y,
-                28f);
+                42f);
         }
 
         if (settings.PvpDeathRespawn == PvpDeathRespawnMode.CorpseTimer)
@@ -381,9 +393,9 @@ internal sealed class RaceSettingsMenu : MenuWindow
     {
         DrawSectionTitle("CURRENT RULES", width, ref y);
         string summary =
-            $"Progression: {WaitModeLabel(settings.WaitMode)}\n"
+            $"Progression: {(settings.UsesPersonalCampfireClaims ? "personal PVP checkpoints" : WaitModeLabel(settings.WaitMode))}\n"
             + $"Respawn: {ModeLabel(settings.Mode)} ({settings.ActivePenaltyMinutes} min penalty)\n"
-            + $"Final hazard: {HazardScopeLabel(settings.WaitMode)}\n"
+            + $"Final hazard: {(settings.UsesPersonalCampfireClaims ? "separate for every player" : HazardScopeLabel(settings.WaitMode))}\n"
             + $"Old biomes: {RetentionLabel(settings)}";
         float summaryHeight = summaryStyle.CalcHeight(new GUIContent(summary), width - 20f) + 16f;
         GUI.Box(new Rect(0f, y, width, summaryHeight), GUIContent.none);

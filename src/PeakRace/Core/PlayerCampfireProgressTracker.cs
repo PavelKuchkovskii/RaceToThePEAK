@@ -74,7 +74,8 @@ internal sealed class PlayerCampfireProgressTracker : MonoBehaviourPunCallbacks
         }
 
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;
-        if (settings.WaitMode != CampfireWaitMode.Nobody)
+        if (settings.UsesPersonalCampfireClaims
+            || settings.WaitMode != CampfireWaitMode.Nobody)
         {
             // Team and lobby checkpoints are earned only by a validated logical
             // completion, not merely by standing in a biome somebody else loaded.
