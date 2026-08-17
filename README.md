@@ -48,7 +48,7 @@ Disconnected players and bots are excluded. A player who did not select a troop 
 
 ## PVP Campfire Abilities
 
-Each personally completed campfire replaces the racer's previous main ability with one weighted random ability. Press **F4** by default to use an active main ability; passive abilities work automatically. When PVP is selected, the host lobby panel shows every ability weight, Chaos weight, Mega Launch parameter and hidden-food chance. These rules synchronize to the room and lock when the run starts. The personal F4/F5 key bindings remain in RaceToThePeak's BepInEx config.
+Each personally completed campfire replaces the racer's previous main ability with one weighted random ability. Press **F** by default to use an active main ability; passive abilities work automatically. When PVP is selected, the host lobby panel shows every ability weight, Chaos weight, Mega Launch parameter and hidden-food chance. These rules synchronize to the room and lock when the run starts. The personal F/C key bindings remain configurable in RaceToThePeak's BepInEx config.
 
 - **Adrenaline** applies the original Lollipop and Energy Drink effects together.
 - **Shield** passively consumes itself to block the next directed Exhaust, Recall or Ghost Runner.
@@ -60,7 +60,7 @@ Each personally completed campfire replaces the racer's previous main ability wi
 - **Ghost Runner** lets a ghost penalize the living racer they are spectating for 15 seconds.
 - **Mega Launch** starts a five-second countdown, then applies a physical impulse in the current look direction. It is reusable after a configurable cooldown.
 
-The last racer to personally activate each campfire also receives one separate **Chaos** charge, stored in addition to the main slot and activated with **F5** by default. Its configurable weighted roll can restore stamina, grant global Adrenaline, knock everyone unconscious, swap racers between recorded safe positions, or move racers to a previous or middle campfire. Only one Chaos charge can be stored.
+The last racer to personally activate each campfire also receives one separate **Chaos** charge, stored in addition to the main slot and activated with **C** by default. Its configurable weighted roll can restore stamina, grant global Adrenaline, knock everyone unconscious, swap racers between recorded safe positions, or move racers to a previous or middle campfire. Only one Chaos charge can be stored.
 
 Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Its host-configurable per-item chance rises from **1.5%** for the leader to **18%** for a racer far behind. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
 

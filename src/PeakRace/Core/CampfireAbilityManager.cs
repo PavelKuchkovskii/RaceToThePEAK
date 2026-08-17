@@ -83,9 +83,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
     private static bool IsAuthority => !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
 
-    internal string AbilityKeyDisplayName => (abilityKeyConfig?.Value ?? Key.F4).ToString();
+    internal string AbilityKeyDisplayName => (abilityKeyConfig?.Value ?? Key.F).ToString();
 
-    internal string ChaosKeyDisplayName => (chaosKeyConfig?.Value ?? Key.F5).ToString();
+    internal string ChaosKeyDisplayName => (chaosKeyConfig?.Value ?? Key.C).ToString();
 
     private void Awake()
     {
@@ -105,13 +105,30 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         abilityKeyConfig = config.Bind(
             "PVP Abilities",
             "AbilityKey",
-            Key.F4,
+            Key.F,
             "Key used to activate the current non-passive Campfire Ability.");
         chaosKeyConfig = config.Bind(
             "PVP Abilities",
             "ChaosKey",
-            Key.F5,
+            Key.C,
             "Key used to activate the separately stored Chaos charge.");
+        ConfigEntry<int> keyBindingSchemaConfig = config.Bind(
+            "Internal",
+            "PvpAbilityKeyBindingSchema",
+            0,
+            "Internal one-time migration marker for PVP ability key defaults.");
+        if (keyBindingSchemaConfig.Value < 1)
+        {
+            if (abilityKeyConfig.Value == Key.F4)
+            {
+                abilityKeyConfig.Value = Key.F;
+            }
+            if (chaosKeyConfig.Value == Key.F5)
+            {
+                chaosKeyConfig.Value = Key.C;
+            }
+            keyBindingSchemaConfig.Value = 1;
+        }
         megaLaunchCooldownConfig = config.Bind(
             "PVP Abilities",
             "MegaLaunchCooldownSeconds",
