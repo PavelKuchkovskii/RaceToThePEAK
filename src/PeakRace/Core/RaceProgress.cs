@@ -43,8 +43,8 @@ internal readonly struct RaceProgress
 
         MapHandler map = Singleton<MapHandler>.Instance;
         segment = Mathf.Clamp(physicalSegment, 0, map.segments.Length - 1);
-        float start = GetBoundaryZ(map, segment - 1, character.Center.z);
-        float end = GetBoundaryZ(map, segment, start + 1f);
+        float start = GetSegmentStartZ(map, segment);
+        float end = GetCampfireZ(map, segment, start + 1f);
         if (Mathf.Abs(end - start) > 0.01f)
         {
             progress = Mathf.Clamp01((character.Center.z - start) / (end - start));
@@ -62,7 +62,50 @@ internal readonly struct RaceProgress
         return new RaceProgress(checkpoint, segment, progress);
     }
 
-    private static float GetBoundaryZ(MapHandler map, int campfireIndex, float fallback)
+    private static float GetSegmentStartZ(MapHandler map, int segment)
+    {
+        if (segment > 0)
+        {
+            return GetCampfireZ(
+                map,
+                segment - 1,
+                GetSegmentRootZ(map, segment));
+        }
+
+        MountainProgressHandler progressHandler =
+            Singleton<MountainProgressHandler>.Instance;
+        MountainProgressHandler.ProgressPoint[] points =
+            progressHandler?.progressPoints;
+        if (points != null
+            && points.Length > 0
+            && points[0]?.transform != null)
+        {
+            return points[0].transform.position.z;
+        }
+
+        // This fallback must be shared by every racer. Using the character's
+        // own position here makes everybody in the first biome score zero.
+        return GetSegmentRootZ(map, segment);
+    }
+
+    private static float GetSegmentRootZ(MapHandler map, int segment)
+    {
+        if (segment >= 0 && segment < map.segments.Length)
+        {
+            GameObject root = map.segments[segment].segmentParent;
+            if (root != null)
+            {
+                return root.transform.position.z;
+            }
+        }
+
+        return map.transform.position.z;
+    }
+
+    private static float GetCampfireZ(
+        MapHandler map,
+        int campfireIndex,
+        float fallback)
     {
         if (campfireIndex < 0 || campfireIndex >= map.segments.Length)
         {
