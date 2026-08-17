@@ -76,8 +76,8 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
             map.segments.Length - 1);
         int retainedFloor = DetermineRetainedFloor(map, currentSegment);
         ApplySegmentRetention(map, currentSegment, retainedFloor);
-        OpenLoadedBoundaries(map, currentSegment);
         transitionAccess.Reconcile(map, currentSegment);
+        ApplyBoundaryPolicy(map, currentSegment);
 
         if (retainedFloor != lastRetainedFloor)
         {
@@ -183,7 +183,7 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
         }
     }
 
-    private static void OpenLoadedBoundaries(MapHandler map, int currentSegment)
+    private void ApplyBoundaryPolicy(MapHandler map, int currentSegment)
     {
         for (int destinationSegment = 1;
             destinationSegment <= currentSegment;
@@ -202,8 +202,21 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
                 false);
         }
 
-        // The next globally unloaded segment stays protected for everybody.
-        SetActiveIfDifferent(map.segments[currentSegment].wallNext, true);
+        // PEAK's future-biome seal is a very large volume. It is safe for a
+        // racer already admitted into the current biome, but on a lagging
+        // client it can overlap the retained route below the previous fire.
+        // Keep it open until that local racer earns entry; the master-client
+        // progression guard prevents skipping the fire in the meantime.
+        bool shouldEnableUpperSeal =
+            transitionAccess.ShouldEnableUpperBiomeSeal(map, currentSegment);
+        GameObject upperSeal = map.segments[currentSegment].wallNext;
+        if (upperSeal != null && upperSeal.activeSelf != shouldEnableUpperSeal)
+        {
+            upperSeal.SetActive(shouldEnableUpperSeal);
+            Plugin.Log.LogInfo(
+                $"{(shouldEnableUpperSeal ? "Enabled" : "Opened")} upper biome "
+                + $"seal {currentSegment} for the local checkpoint scope.");
+        }
     }
 
     private static IEnumerable<Character> GetActivePlayerCharacters()

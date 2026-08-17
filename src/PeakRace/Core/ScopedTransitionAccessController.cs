@@ -7,19 +7,19 @@ using Zorro.Core;
 namespace PeakRace.Core;
 
 /// <summary>
-/// Keeps globally loaded biome boundaries open while enforcing progression at
-/// the much narrower, local checkpoint boundary. The local collider provides
-/// immediate physical feedback; the master-client correction is the authority
-/// fallback for tunnelling, physics desync, and modified clients.
+/// Enforces earned checkpoint access without adding world-sized colliders.
+/// PEAK's biome seals overlap retained lower routes because vanilla only loads
+/// the next biome after everybody has arrived. The race keeps those seals open
+/// for lagging clients and lets the master client correct an actual bypass only
+/// after the player has clearly left the campfire interaction area.
 /// </summary>
 internal sealed class ScopedTransitionAccessController
 {
-    private const float GateWidth = 4096f;
-    private const float GateHeight = 4096f;
-    private const float GateDepth = 0.75f;
     private const float CorrectionCooldownSeconds = 0.75f;
+    private const float CampfireExitPadding = 10f;
+    private const float CampfireAltitudeTolerance = 12f;
 
-    private readonly Dictionary<int, TransitionGate> gates = new();
+    private readonly Dictionary<int, TransitionBoundary> boundaries = new();
     private readonly Dictionary<int, TransitionSafePosition> safePositions = new();
     private readonly Dictionary<int, float> nextCorrectionTimes = new();
 
@@ -31,14 +31,14 @@ internal sealed class ScopedTransitionAccessController
             return;
         }
 
+        ReconcileBoundaries(map, currentSegment);
+
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;
         CampfireProgressionController progression =
             CampfireProgressionController.Instance;
         bool usesScopedAccess = progression != null
             && (settings.UsesPersonalCampfireClaims
                 || settings.WaitMode != CampfireWaitMode.Nobody);
-
-        ReconcileLocalGates(map, currentSegment, progression, usesScopedAccess);
 
         if (usesScopedAccess && HasProgressionAuthority)
         {
@@ -51,56 +51,71 @@ internal sealed class ScopedTransitionAccessController
         }
     }
 
-    internal void Reset()
+    internal bool ShouldEnableUpperBiomeSeal(MapHandler map, int currentSegment)
     {
-        foreach (TransitionGate gate in gates.Values)
+        if (currentSegment < 0)
         {
-            gate.Destroy();
+            return true;
         }
 
-        gates.Clear();
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        if (!settings.UsesPersonalCampfireClaims
+            && settings.WaitMode == CampfireWaitMode.Nobody)
+        {
+            return true;
+        }
+
+        Character localCharacter = Character.localCharacter;
+        CampfireProgressionController progression =
+            CampfireProgressionController.Instance;
+        if (localCharacter == null || progression == null)
+        {
+            return true;
+        }
+
+        int completedCampfire =
+            progression.GetCompletedCampfireIndex(localCharacter);
+
+        // During a guest's transition RPC there can be a short interval where
+        // the fire is lit but CurrentSegmentNumber still points at the source.
+        if (IsCampfireLit(map, currentSegment)
+            && completedCampfire < currentSegment)
+        {
+            return false;
+        }
+
+        // The upper seal belongs to the globally current biome. It is safe to
+        // restore only after this client has earned entry into that biome.
+        return completedCampfire >= currentSegment - 1;
+    }
+
+    internal void Reset()
+    {
+        boundaries.Clear();
         safePositions.Clear();
         nextCorrectionTimes.Clear();
     }
 
-    private void ReconcileLocalGates(
-        MapHandler map,
-        int currentSegment,
-        CampfireProgressionController progression,
-        bool usesScopedAccess)
+    private void ReconcileBoundaries(MapHandler map, int currentSegment)
     {
-        Character localCharacter = Character.localCharacter;
-        int completedCampfire = usesScopedAccess && localCharacter != null
-            ? progression.GetCompletedCampfireIndex(localCharacter)
-            : currentSegment;
-
         for (int destinationSegment = 1;
             destinationSegment <= currentSegment;
             destinationSegment++)
         {
-            if (!gates.TryGetValue(destinationSegment, out TransitionGate gate))
+            if (TryCreateBoundary(
+                map,
+                destinationSegment,
+                out TransitionBoundary boundary))
             {
-                gate = CreateGate(map, destinationSegment);
-                if (gate == null)
-                {
-                    continue;
-                }
-
-                gates.Add(destinationSegment, gate);
+                boundaries[destinationSegment] = boundary;
             }
-
-            bool shouldBlockLocalPlayer = usesScopedAccess
-                && localCharacter != null
-                && completedCampfire < destinationSegment - 1;
-            gate.SetBlocking(shouldBlockLocalPlayer, localCharacter);
         }
 
-        foreach (int obsoleteSegment in gates.Keys
+        foreach (int obsoleteSegment in boundaries.Keys
             .Where(segment => segment > currentSegment)
             .ToArray())
         {
-            gates[obsoleteSegment].Destroy();
-            gates.Remove(obsoleteSegment);
+            boundaries.Remove(obsoleteSegment);
         }
     }
 
@@ -160,42 +175,21 @@ internal sealed class ScopedTransitionAccessController
         PruneDisconnectedState(connectedIds);
     }
 
-    private static TransitionGate CreateGate(MapHandler map, int destinationSegment)
-    {
-        if (!TryGetBoundaryPosition(map, destinationSegment, out Vector3 position))
-        {
-            Plugin.Log.LogWarning(
-                $"Could not resolve checkpoint boundary for segment {destinationSegment}; "
-                + "the host progression correction remains active.");
-            return null;
-        }
-
-        GameObject gateObject = new(
-            $"RaceToThePeak_TransitionGate_{destinationSegment}");
-        gateObject.transform.SetParent(map.transform, worldPositionStays: true);
-        gateObject.transform.position = position;
-
-        BoxCollider collider = gateObject.AddComponent<BoxCollider>();
-        collider.isTrigger = false;
-        collider.size = new Vector3(GateWidth, GateHeight, GateDepth);
-
-        ScopedTransitionGateFeedback feedback =
-            gateObject.AddComponent<ScopedTransitionGateFeedback>();
-        feedback.Initialize(collider);
-        gateObject.SetActive(false);
-        return new TransitionGate(gateObject, collider, feedback);
-    }
-
-    private static bool TryGetBoundaryPosition(
+    private static bool TryCreateBoundary(
         MapHandler map,
         int destinationSegment,
-        out Vector3 position)
+        out TransitionBoundary boundary)
     {
         Campfire campfire = TryGetTransitionCampfire(map, destinationSegment);
-        float minimumForwardPosition = campfire != null
-            ? campfire.transform.position.z
-                + Mathf.Max(5f, campfire.moraleBoostRadius + 2f)
-            : float.NegativeInfinity;
+        if (campfire == null)
+        {
+            boundary = default;
+            return false;
+        }
+
+        Vector3 campfirePosition = campfire.transform.position;
+        float forwardPosition = campfirePosition.z
+            + Mathf.Max(5f, campfire.moraleBoostRadius + 2f);
 
         MountainProgressHandler progressHandler =
             Singleton<MountainProgressHandler>.Instance;
@@ -206,20 +200,19 @@ internal sealed class ScopedTransitionAccessController
             && destinationSegment < points.Length
             && points[destinationSegment]?.transform != null)
         {
-            position = points[destinationSegment].transform.position;
-            position.z = Mathf.Max(position.z, minimumForwardPosition);
-            return true;
+            forwardPosition = Mathf.Max(
+                forwardPosition,
+                points[destinationSegment].transform.position.z);
         }
 
-        if (campfire != null)
-        {
-            position = campfire.transform.position;
-            position.z = minimumForwardPosition;
-            return true;
-        }
-
-        position = default;
-        return false;
+        float exitRadius = Mathf.Max(1f, campfire.moraleBoostRadius)
+            + CampfireExitPadding;
+        boundary = new TransitionBoundary(
+            forwardPosition,
+            campfirePosition.y - CampfireAltitudeTolerance,
+            campfirePosition,
+            exitRadius * exitRadius);
+        return true;
     }
 
     private static Campfire TryGetTransitionCampfire(
@@ -244,16 +237,23 @@ internal sealed class ScopedTransitionAccessController
             return false;
         }
 
+        Vector3 position = character.Center;
         for (int destinationSegment = 1;
             destinationSegment <= currentSegment;
             destinationSegment++)
         {
-            if (!gates.TryGetValue(destinationSegment, out TransitionGate gate))
+            if (!boundaries.TryGetValue(
+                destinationSegment,
+                out TransitionBoundary boundary))
             {
                 return false;
             }
 
-            if (character.Center.z <= gate.ForwardPosition + GateDepth * 0.5f)
+            bool clearlyPastCampfire = position.z > boundary.ForwardPosition
+                && position.y >= boundary.MinimumAltitude
+                && (position - boundary.CampfirePosition).sqrMagnitude
+                    > boundary.ExitRadiusSquared;
+            if (!clearlyPastCampfire)
             {
                 break;
             }
@@ -350,6 +350,13 @@ internal sealed class ScopedTransitionAccessController
             : 0f;
     }
 
+    private static bool IsCampfireLit(MapHandler map, int campfireIndex)
+    {
+        Campfire campfire = map.segments[campfireIndex].segmentCampfire
+            ?.GetComponentInChildren<Campfire>(true);
+        return campfire != null && campfire.state != Campfire.FireState.Off;
+    }
+
     private static bool HasProgressionAuthority =>
         !PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient;
 
@@ -380,6 +387,26 @@ internal sealed class ScopedTransitionAccessController
             ?? "Player";
     }
 
+    private readonly struct TransitionBoundary
+    {
+        internal TransitionBoundary(
+            float forwardPosition,
+            float minimumAltitude,
+            Vector3 campfirePosition,
+            float exitRadiusSquared)
+        {
+            ForwardPosition = forwardPosition;
+            MinimumAltitude = minimumAltitude;
+            CampfirePosition = campfirePosition;
+            ExitRadiusSquared = exitRadiusSquared;
+        }
+
+        internal float ForwardPosition { get; }
+        internal float MinimumAltitude { get; }
+        internal Vector3 CampfirePosition { get; }
+        internal float ExitRadiusSquared { get; }
+    }
+
     private readonly struct TransitionSafePosition
     {
         internal TransitionSafePosition(int segment, Vector3 position)
@@ -390,114 +417,5 @@ internal sealed class ScopedTransitionAccessController
 
         internal int Segment { get; }
         internal Vector3 Position { get; }
-    }
-
-    private sealed class TransitionGate
-    {
-        private readonly GameObject gameObject;
-        private readonly BoxCollider collider;
-        private readonly ScopedTransitionGateFeedback feedback;
-
-        internal TransitionGate(
-            GameObject gameObject,
-            BoxCollider collider,
-            ScopedTransitionGateFeedback feedback)
-        {
-            this.gameObject = gameObject;
-            this.collider = collider;
-            this.feedback = feedback;
-        }
-
-        internal float ForwardPosition => gameObject != null
-            ? gameObject.transform.position.z
-            : float.PositiveInfinity;
-
-        internal void SetBlocking(bool blocking, Character localCharacter)
-        {
-            if (gameObject == null)
-            {
-                return;
-            }
-
-            if (gameObject.activeSelf != blocking)
-            {
-                gameObject.SetActive(blocking);
-            }
-
-            if (!blocking)
-            {
-                return;
-            }
-
-            feedback.SetLocalCharacter(localCharacter);
-            foreach (Character character in GetActivePlayerCharacters())
-            {
-                bool ignore = character != localCharacter;
-                foreach (Collider characterCollider in
-                    character.GetComponentsInChildren<Collider>(true))
-                {
-                    if (characterCollider != null && characterCollider != collider)
-                    {
-                        Physics.IgnoreCollision(collider, characterCollider, ignore);
-                    }
-                }
-            }
-        }
-
-        internal void Destroy()
-        {
-            if (gameObject != null)
-            {
-                Object.Destroy(gameObject);
-            }
-        }
-    }
-}
-
-/// <summary>
-/// Shows a throttled local explanation when the scoped transition gate is hit.
-/// </summary>
-internal sealed class ScopedTransitionGateFeedback : MonoBehaviour
-{
-    private const float FeedbackCooldownSeconds = 1f;
-
-    private Collider gateCollider;
-    private Character localCharacter;
-    private float nextFeedbackTime;
-
-    internal void Initialize(Collider collider)
-    {
-        gateCollider = collider;
-    }
-
-    internal void SetLocalCharacter(Character character)
-    {
-        localCharacter = character;
-    }
-
-    private void OnCollisionEnter(Collision collision)
-    {
-        ShowFeedbackIfLocal(collision.collider);
-    }
-
-    private void OnCollisionStay(Collision collision)
-    {
-        ShowFeedbackIfLocal(collision.collider);
-    }
-
-    private void ShowFeedbackIfLocal(Collider other)
-    {
-        if (gateCollider == null
-            || localCharacter == null
-            || Time.unscaledTime < nextFeedbackTime
-            || other.GetComponentInParent<Character>() != localCharacter)
-        {
-            return;
-        }
-
-        nextFeedbackTime = Time.unscaledTime + FeedbackCooldownSeconds;
-        CampfireAbilityManager.Instance?.ShowFeedback(
-            "ACTIVATE THE CAMPFIRE TO CONTINUE",
-            Plugin.Color);
     }
 }
