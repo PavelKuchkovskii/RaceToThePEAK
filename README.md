@@ -60,7 +60,7 @@ Each personally completed campfire replaces the racer's previous main ability wi
 - **Ghost Runner** lets a ghost penalize the living racer they are spectating for 15 seconds.
 - **Mega Launch** starts a five-second countdown, then applies a physical impulse in the current look direction. It is reusable after a configurable cooldown.
 
-The in-run HUD uses a dedicated icon for every ability and for Chaos. Ready active abilities have a bright frame, passive abilities use a blue frame, and a cooling-down Mega Launch is dimmed with remaining seconds plus a filling readiness bar. A consumed or not-yet-earned slot is shown as empty.
+The compact in-run HUD appears in the upper-right only for slots or bonuses the player currently owns, so it never covers PEAK's stamina, status or inventory HUD. Ready active abilities have a bright frame, passive abilities use a blue frame, and a cooling-down Mega Launch is dimmed with remaining seconds plus a filling readiness bar. Empty main and Chaos slots take no screen space.
 
 The last racer to personally activate each campfire also receives one separate **Chaos** charge, stored in addition to the main slot and activated with **C** by default. Its configurable weighted roll can restore stamina, grant global Adrenaline, knock everyone unconscious, swap racers between recorded safe positions, or move racers to a previous or middle campfire. Only one Chaos charge can be stored.
 

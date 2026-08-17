@@ -21,6 +21,7 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
     private GUIStyle hintStyle;
     private GUIStyle feedbackStyle;
     private GUIStyle iconOverlayStyle;
+    private GUIStyle badgeStyle;
 
     private void Awake()
     {
@@ -44,13 +45,6 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
         int previousDepth = GUI.depth;
         GUI.depth = -510;
 
-        const float width = 360f;
-        const float height = 170f;
-        float x = 18f;
-        float y = Mathf.Max(18f, Screen.height - height - 38f);
-        Rect panel = new(x, y, width, height);
-        DrawSolidRect(panel, new Color(0.02f, 0.02f, 0.02f, 0.82f));
-
         CampfireAbility ability = manager.GetAbility(localCharacter);
         bool passive = CampfireAbilityInfo.IsPassive(ability);
         double megaCooldown = ability == CampfireAbility.MegaLaunch
@@ -68,68 +62,112 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
                 : passive
                     ? new Color(0.35f, 0.82f, 1f, 1f)
                     : new Color(0.43f, 1f, 0.55f, 1f);
-        abilityIcons.TryGetValue(ability, out Texture2D abilityIcon);
-        DrawFramedIcon(
-            new Rect(x + 12f, y + 34f, 88f, 88f),
-            abilityIcon,
-            abilityBorder,
-            dimmed: coolingDown,
-            coolingDown ? Mathf.CeilToInt((float)megaCooldown).ToString() : null,
-            cooldownProgress);
-
-        GUI.color = Plugin.Color;
-        GUI.Label(
-            new Rect(x + 12f, y + 7f, width - 24f, 20f),
-            "CAMPFIRE ABILITY",
-            titleStyle);
-        GUI.color = Color.white;
-        GUI.Label(
-            new Rect(x + 112f, y + 35f, width - 124f, 30f),
-            CampfireAbilityInfo.GetName(ability),
-            abilityStyle);
-
         float catchUpMultiplier = manager.GetCatchUpMultiplier(localCharacter);
-        string abilityHint = ability == CampfireAbility.None
-            ? "Activate a campfire to receive one"
-            : coolingDown
+        bool hasSystemCatchUp = manager.HasSystemCatchUp(localCharacter);
+        string abilityHint = coolingDown
                 ? $"COOLDOWN  •  {Mathf.CeilToInt((float)megaCooldown)}s"
                 : ability == CampfireAbility.CatchUp && catchUpMultiplier > 1f
                     ? $"PASSIVE  •  +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%"
                     : passive
                         ? "PASSIVE"
                         : $"{manager.AbilityKeyDisplayName}: ACTIVATE";
-        GUI.Label(
-            new Rect(x + 112f, y + 68f, width - 124f, 22f),
-            abilityHint,
-            hintStyle);
 
-        if (manager.HasSystemCatchUp(localCharacter))
+        Rect safeArea = Screen.safeArea;
+        float right = safeArea.xMax - 18f;
+        float cursorY = Screen.height - safeArea.yMax + 18f;
+        const float cardWidth = 300f;
+        const float cardHeight = 82f;
+        float cardX = right - cardWidth;
+        if (ability != CampfireAbility.None)
         {
-            GUI.color = new Color(0.4f, 0.9f, 1f, 1f);
+            Rect card = new(cardX, cursorY, cardWidth, cardHeight);
+            DrawSolidRect(
+                card,
+                new Color(abilityBorder.r, abilityBorder.g, abilityBorder.b, 0.78f));
+            DrawSolidRect(
+                new Rect(card.x + 2f, card.y + 2f, card.width - 4f, card.height - 4f),
+                new Color(0.02f, 0.02f, 0.025f, 0.78f));
+
+            abilityIcons.TryGetValue(ability, out Texture2D abilityIcon);
+            DrawFramedIcon(
+                new Rect(card.x + 9f, card.y + 9f, 64f, 64f),
+                abilityIcon,
+                abilityBorder,
+                dimmed: coolingDown,
+                coolingDown ? Mathf.CeilToInt((float)megaCooldown).ToString() : null,
+                cooldownProgress);
+
+            GUI.color = Plugin.Color;
             GUI.Label(
-                new Rect(x + 112f, y + 94f, width - 124f, 20f),
-                $"LAST PLACE BOOST  +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
+                new Rect(card.x + 82f, card.y + 4f, card.width - 94f, 17f),
+                "CAMPFIRE ABILITY",
+                titleStyle);
+            GUI.color = Color.white;
+            GUI.Label(
+                new Rect(card.x + 82f, card.y + 21f, card.width - 94f, 28f),
+                CampfireAbilityInfo.GetName(ability),
+                abilityStyle);
+            GUI.Label(
+                new Rect(card.x + 82f, card.y + 51f, card.width - 94f, 22f),
+                abilityHint,
                 hintStyle);
+
+            if (hasSystemCatchUp)
+            {
+                Rect badge = new(card.x + card.width - 108f, card.y + 4f, 100f, 18f);
+                DrawSolidRect(badge, new Color(0.08f, 0.36f, 0.46f, 0.9f));
+                GUI.color = new Color(0.55f, 0.95f, 1f, 1f);
+                GUI.Label(
+                    badge,
+                    $"LAST +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
+                    badgeStyle);
+            }
+
+            cursorY += cardHeight + 8f;
         }
 
         bool hasChaos = manager.HasChaos(localCharacter);
-        Color chaosColor = hasChaos
-            ? new Color(1f, 0.34f, 0.23f, 1f)
-            : new Color(0.38f, 0.38f, 0.38f, 1f);
-        DrawFramedIcon(
-            new Rect(x + 12f, y + 128f, 36f, 36f),
-            chaosIcon,
-            chaosColor,
-            dimmed: !hasChaos,
-            overlayText: null,
-            progress: -1f);
-        GUI.color = chaosColor;
-        GUI.Label(
-            new Rect(x + 58f, y + 132f, width - 70f, 28f),
-            hasChaos
-                ? $"CHAOS  •  {manager.ChaosKeyDisplayName}: ACTIVATE"
-                : "CHAOS  •  EMPTY",
-            hintStyle);
+        if (hasChaos)
+        {
+            Color chaosColor = new(1f, 0.34f, 0.23f, 1f);
+            const float chaosWidth = 188f;
+            const float chaosHeight = 44f;
+            Rect chaosCard = new(right - chaosWidth, cursorY, chaosWidth, chaosHeight);
+            DrawSolidRect(
+                chaosCard,
+                new Color(chaosColor.r, chaosColor.g, chaosColor.b, 0.8f));
+            DrawSolidRect(
+                new Rect(
+                    chaosCard.x + 2f,
+                    chaosCard.y + 2f,
+                    chaosCard.width - 4f,
+                    chaosCard.height - 4f),
+                new Color(0.02f, 0.02f, 0.025f, 0.8f));
+            DrawFramedIcon(
+                new Rect(chaosCard.x + 5f, chaosCard.y + 5f, 34f, 34f),
+                chaosIcon,
+                chaosColor,
+                dimmed: false,
+                overlayText: null,
+                progress: -1f);
+            GUI.color = chaosColor;
+            GUI.Label(
+                new Rect(chaosCard.x + 47f, chaosCard.y + 8f, chaosCard.width - 54f, 28f),
+                $"CHAOS  •  {manager.ChaosKeyDisplayName}: ACTIVATE",
+                hintStyle);
+            cursorY += chaosHeight + 8f;
+        }
+
+        if (ability == CampfireAbility.None && hasSystemCatchUp)
+        {
+            Rect badge = new(right - 154f, cursorY, 154f, 28f);
+            DrawSolidRect(badge, new Color(0.03f, 0.18f, 0.23f, 0.84f));
+            GUI.color = new Color(0.55f, 0.95f, 1f, 1f);
+            GUI.Label(
+                badge,
+                $"LAST PLACE  +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
+                badgeStyle);
+        }
 
         if (manager.TryGetFeedback(out string feedback, out Color feedbackColor))
         {
@@ -224,6 +262,7 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
         hintStyle ??= CreateStyle(13, TextAnchor.MiddleLeft, FontStyle.Bold);
         feedbackStyle ??= CreateStyle(22, TextAnchor.MiddleCenter, FontStyle.Bold);
         iconOverlayStyle ??= CreateStyle(24, TextAnchor.MiddleCenter, FontStyle.Bold);
+        badgeStyle ??= CreateStyle(12, TextAnchor.MiddleCenter, FontStyle.Bold);
     }
 
     private void LoadIcons()
