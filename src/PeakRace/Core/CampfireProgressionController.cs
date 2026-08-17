@@ -232,6 +232,25 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
         return null;
     }
 
+    /// <summary>
+    /// Middle Campfire Chaos intentionally compresses the field. Intermediate
+    /// checkpoints are treated as traversed, while the destination fire itself
+    /// remains unclaimed and still gates the player's next biome.
+    /// </summary>
+    internal void AdvancePersonalProgressForChaos(Character character, int progressFloor)
+    {
+        if (!IsAuthority
+            || RaceSettingsManager.Current.Mode != RespawnMode.Pvp
+            || character == null
+            || progressFloor < 0
+            || GetActorProgress(GetActorNumber(character)) >= progressFloor)
+        {
+            return;
+        }
+
+        PublishProgress(character, progressFloor, CampfireWaitMode.Nobody);
+    }
+
     internal IEnumerable<Character> GetActiveCharactersInScope(Character reference)
     {
         RaceSettingsSnapshot settings = RaceSettingsManager.Current;

@@ -1,4 +1,5 @@
 using HarmonyLib;
+using Peak.Afflictions;
 using PeakRace.Core;
 using Photon.Pun;
 using System;
@@ -107,6 +108,32 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         }
 
         photonView.RPC(nameof(RPCA_RemoveExtraStamina), RpcTarget.All);
+    }
+
+    internal void SendFullStamina()
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            character?.AddStamina(1f);
+            return;
+        }
+
+        photonView.RPC(nameof(RPCA_GainFullStamina), RpcTarget.All);
+    }
+
+    internal void SendInfiniteStamina(float seconds)
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            character?.refs.afflictions.AddAffliction(
+                new Affliction_InfiniteStamina(seconds));
+            return;
+        }
+
+        photonView.RPC(
+            nameof(RPCA_ApplyInfiniteStamina),
+            RpcTarget.All,
+            seconds);
     }
 
     internal void SendSecondWindRecovery(double immunityUntil)
@@ -296,6 +323,27 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         if (AbilityRpcValidation.IsAuthorityMessage(messageInfo) && photonView.IsMine)
         {
             character.SetExtraStamina(0f);
+        }
+    }
+
+    [PunRPC]
+    private void RPCA_GainFullStamina(PhotonMessageInfo messageInfo)
+    {
+        if (AbilityRpcValidation.IsAuthorityMessage(messageInfo) && photonView.IsMine)
+        {
+            character.AddStamina(1f);
+        }
+    }
+
+    [PunRPC]
+    private void RPCA_ApplyInfiniteStamina(
+        float seconds,
+        PhotonMessageInfo messageInfo)
+    {
+        if (AbilityRpcValidation.IsAuthorityMessage(messageInfo) && photonView.IsMine)
+        {
+            character.refs.afflictions.AddAffliction(
+                new Affliction_InfiniteStamina(Mathf.Clamp(seconds, 0f, 30f)));
         }
     }
 

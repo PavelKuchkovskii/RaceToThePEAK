@@ -37,7 +37,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private readonly Dictionary<int, double> megaLaunchImmunityUntil = new();
     private readonly Dictionary<int, PendingMegaLaunch> pendingMegaLaunches = new();
     private readonly Dictionary<int, float> catchUpMultipliers = new();
+    private readonly Dictionary<int, Vector3> lastSafePositions = new();
     private readonly Dictionary<CampfireAbility, ConfigEntry<float>> abilityWeights = new();
+    private readonly Dictionary<ChaosEffect, ConfigEntry<float>> chaosWeights = new();
 
     private ConfigEntry<Key> abilityKeyConfig;
     private ConfigEntry<Key> chaosKeyConfig;
@@ -49,6 +51,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private bool initialized;
     private bool clearedOutsideRun;
     private float nextCatchUpRefreshTime;
+    private float nextSafePositionRefreshTime;
 
     internal static CampfireAbilityManager Instance { get; private set; }
 
@@ -107,6 +110,13 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         BindWeight(config, CampfireAbility.ChaosHorn, 10f);
         BindWeight(config, CampfireAbility.GhostRunner, 8f);
         BindWeight(config, CampfireAbility.MegaLaunch, 12f);
+        BindChaosWeight(config, ChaosEffect.FullStamina, 22f);
+        BindChaosWeight(config, ChaosEffect.InfiniteStamina, 18f);
+        BindChaosWeight(config, ChaosEffect.GlobalAdrenaline, 18f);
+        BindChaosWeight(config, ChaosEffect.GlobalUnconscious, 16f);
+        BindChaosWeight(config, ChaosEffect.PlayerSwap, 12f);
+        BindChaosWeight(config, ChaosEffect.PreviousCampfire, 10f);
+        BindChaosWeight(config, ChaosEffect.MiddleCampfire, 4f);
         initialized = true;
     }
 
@@ -121,6 +131,20 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             defaultWeight,
             new ConfigDescription(
                 $"Relative campfire roll weight for {CampfireAbilityInfo.GetName(ability)}. Zero disables it.",
+                new AcceptableValueRange<float>(0f, 1000f)));
+    }
+
+    private void BindChaosWeight(
+        ConfigFile config,
+        ChaosEffect effect,
+        float defaultWeight)
+    {
+        chaosWeights[effect] = config.Bind(
+            "PVP Chaos Weights",
+            effect + "Weight",
+            defaultWeight,
+            new ConfigDescription(
+                $"Relative roll weight for the {effect} Chaos effect. Zero disables it.",
                 new AcceptableValueRange<float>(0f, 1000f)));
     }
 
@@ -139,6 +163,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
         clearedOutsideRun = false;
         RefreshCatchUpMultipliers();
+        RefreshSafePositions();
         if (!initialized
             || RaceSettingsManager.Current.Mode != RespawnMode.Pvp
             || Character.localCharacter == null
@@ -222,9 +247,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                 return;
             }
 
-            // Effect selection is added by the effect layer. Never consume a
-            // charge until that layer confirms an effect was started.
-            NotifyMessage(character, "CHAOS READY", new Color(1f, 0.34f, 0.23f, 1f));
+            ActivateChaos(character);
             return;
         }
 
@@ -392,6 +415,258 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
         ConsumeMainAbility(user, CampfireAbility.ChaosHorn);
         NotifyMessage(user, $"CHAOS HORN HIT {affected} PLAYER(S)", Plugin.Color);
+    }
+
+    private void ActivateChaos(Character user)
+    {
+        ChaosEffect effect = RollChaosEffect();
+        SetChaos(user, hasChaos: false);
+        NotifyAll(
+            $"⚠ CHAOS ACTIVATED  •  {FormatChaosEffect(effect)}",
+            new Color(1f, 0.3f, 0.2f, 1f));
+
+        switch (effect)
+        {
+            case ChaosEffect.FullStamina:
+                foreach (Character character in GetLivingCharacters())
+                {
+                    character.GetComponent<CampfireAbilityState>()?.SendFullStamina();
+                }
+                break;
+
+            case ChaosEffect.InfiniteStamina:
+                foreach (Character character in GetLivingCharacters())
+                {
+                    character.GetComponent<CampfireAbilityState>()
+                        ?.SendInfiniteStamina(5f);
+                }
+                break;
+
+            case ChaosEffect.GlobalAdrenaline:
+                foreach (Character character in GetLivingCharacters())
+                {
+                    character.GetComponent<CampfireAbilityState>()?.SendAdrenaline();
+                }
+                break;
+
+            case ChaosEffect.GlobalUnconscious:
+                NotifyAll(
+                    "EVERYONE WILL PASS OUT IN 10 SECONDS",
+                    new Color(1f, 0.35f, 0.2f, 1f));
+                StartCoroutine(GlobalPassOutAfterWarning());
+                break;
+
+            case ChaosEffect.PlayerSwap:
+                SwapPlayersAtSafePositions();
+                break;
+
+            case ChaosEffect.PreviousCampfire:
+                WarpAllToPreviousCampfires();
+                break;
+
+            case ChaosEffect.MiddleCampfire:
+                WarpAllToMiddleCampfire();
+                break;
+        }
+
+        Plugin.Log.LogInfo(
+            $"{user.characterName} activated Chaos effect {effect}.");
+    }
+
+    private ChaosEffect RollChaosEffect()
+    {
+        float total = chaosWeights.Values.Sum(entry => Mathf.Max(0f, entry.Value));
+        if (total <= 0f)
+        {
+            Plugin.Log.LogWarning(
+                "Every Chaos weight is zero; falling back to Full Stamina.");
+            return ChaosEffect.FullStamina;
+        }
+
+        float roll = UnityEngine.Random.Range(0f, total);
+        foreach ((ChaosEffect effect, ConfigEntry<float> entry) in chaosWeights
+            .OrderBy(pair => (int)pair.Key))
+        {
+            roll -= Mathf.Max(0f, entry.Value);
+            if (roll <= 0f)
+            {
+                return effect;
+            }
+        }
+
+        return ChaosEffect.FullStamina;
+    }
+
+    private System.Collections.IEnumerator GlobalPassOutAfterWarning()
+    {
+        yield return new WaitForSeconds(10f);
+        if (!IsAuthority || RaceSettingsManager.Current.Mode != RespawnMode.Pvp)
+        {
+            yield break;
+        }
+
+        foreach (Character character in GetLivingCharacters())
+        {
+            character.photonView.RPC("RPCA_PassOut", RpcTarget.All);
+        }
+    }
+
+    private void SwapPlayersAtSafePositions()
+    {
+        List<Character> characters = GetLivingCharacters().ToList();
+        for (int index = characters.Count - 1; index > 0; index--)
+        {
+            int swapIndex = UnityEngine.Random.Range(0, index + 1);
+            (characters[index], characters[swapIndex]) =
+                (characters[swapIndex], characters[index]);
+        }
+
+        Dictionary<Character, Vector3> positions = characters.ToDictionary(
+            character => character,
+            GetLastSafePosition);
+        int pairedCount = characters.Count - characters.Count % 2;
+        for (int index = 0; index < pairedCount; index += 2)
+        {
+            Character first = characters[index];
+            Character second = characters[index + 1];
+            first.photonView.RPC(
+                "WarpPlayerRPC",
+                RpcTarget.All,
+                positions[second],
+                true);
+            second.photonView.RPC(
+                "WarpPlayerRPC",
+                RpcTarget.All,
+                positions[first],
+                true);
+        }
+    }
+
+    private void WarpAllToPreviousCampfires()
+    {
+        foreach (Character character in GetLivingCharacters())
+        {
+            Vector3 position = RaceRespawnController.GetPreviousCampfirePosition(character);
+            character.photonView.RPC("WarpPlayerRPC", RpcTarget.All, position, true);
+        }
+    }
+
+    private void WarpAllToMiddleCampfire()
+    {
+        List<Character> characters = GetLivingCharacters().ToList();
+        if (characters.Count == 0 || !MapHandler.ExistsAndInitialized)
+        {
+            return;
+        }
+
+        int leadingCheckpoint = characters.Max(character =>
+            RaceProgress.ForCharacter(character).CheckpointIndex);
+        int trailingCheckpoint = characters.Min(character =>
+            RaceProgress.ForCharacter(character).CheckpointIndex);
+        int middleCheckpoint = Mathf.Max(
+            0,
+            Mathf.RoundToInt((leadingCheckpoint + trailingCheckpoint) * 0.5f));
+        if (!TryGetCampfire(middleCheckpoint, out Campfire campfire))
+        {
+            Plugin.Log.LogWarning(
+                $"Chaos could not resolve middle campfire {middleCheckpoint}.");
+            return;
+        }
+
+        for (int index = 0; index < characters.Count; index++)
+        {
+            Character character = characters[index];
+            // Chaos may skip intermediate fires, but the destination fire
+            // itself remains unclaimed and must still be activated personally.
+            CampfireProgressionController.Instance
+                ?.AdvancePersonalProgressForChaos(character, middleCheckpoint - 1);
+            float angle = index * 2.39996323f;
+            Vector3 offset = new(
+                Mathf.Cos(angle) * 2f,
+                2f,
+                Mathf.Sin(angle) * 2f);
+            character.photonView.RPC(
+                "WarpPlayerRPC",
+                RpcTarget.All,
+                campfire.transform.position + offset,
+                true);
+        }
+    }
+
+    private void RefreshSafePositions()
+    {
+        if (Time.unscaledTime < nextSafePositionRefreshTime)
+        {
+            return;
+        }
+
+        nextSafePositionRefreshTime = Time.unscaledTime + 0.2f;
+        foreach (Character character in GetLivingCharacters())
+        {
+            if (character.data.isGrounded
+                && !character.warping
+                && character.data.avarageVelocity.sqrMagnitude < 100f)
+            {
+                lastSafePositions[GetActorNumber(character)] = character.Center;
+            }
+        }
+    }
+
+    private Vector3 GetLastSafePosition(Character character)
+    {
+        return lastSafePositions.TryGetValue(
+            GetActorNumber(character),
+            out Vector3 position)
+            ? position
+            : RaceRespawnController.GetPreviousCampfirePosition(character);
+    }
+
+    private void NotifyAll(string text, Color color)
+    {
+        foreach (Character character in GetActivePlayerCharacters())
+        {
+            NotifyMessage(character, text, color);
+        }
+    }
+
+    private static IEnumerable<Character> GetLivingCharacters()
+    {
+        return GetActivePlayerCharacters().Where(character =>
+            character.data != null && !character.data.dead);
+    }
+
+    private static bool TryGetCampfire(int index, out Campfire campfire)
+    {
+        campfire = null;
+        if (!MapHandler.ExistsAndInitialized)
+        {
+            return false;
+        }
+
+        MapHandler map = Zorro.Core.Singleton<MapHandler>.Instance;
+        if (index < 0 || index >= map.segments.Length)
+        {
+            return false;
+        }
+
+        campfire = map.segments[index].segmentCampfire
+            ?.GetComponentInChildren<Campfire>(true);
+        return campfire != null;
+    }
+
+    private static string FormatChaosEffect(ChaosEffect effect)
+    {
+        return effect switch
+        {
+            ChaosEffect.FullStamina => "FULL STAMINA",
+            ChaosEffect.InfiniteStamina => "INFINITE STAMINA",
+            ChaosEffect.GlobalAdrenaline => "GLOBAL ADRENALINE",
+            ChaosEffect.GlobalUnconscious => "GLOBAL UNCONSCIOUS",
+            ChaosEffect.PlayerSwap => "PLAYER SWAP",
+            ChaosEffect.PreviousCampfire => "PREVIOUS CAMPFIRE",
+            ChaosEffect.MiddleCampfire => "MIDDLE CAMPFIRE",
+            _ => effect.ToString().ToUpperInvariant()
+        };
     }
 
     private void ActivateRecall(Character user)
@@ -1015,7 +1290,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         megaLaunchImmunityUntil.Clear();
         pendingMegaLaunches.Clear();
         catchUpMultipliers.Clear();
+        lastSafePositions.Clear();
         nextCatchUpRefreshTime = 0f;
+        nextSafePositionRefreshTime = 0f;
         feedbackText = null;
 
         if (!clearRoomProperties

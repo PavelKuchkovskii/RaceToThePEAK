@@ -18,6 +18,17 @@ internal enum CampfireAbility
     MegaLaunch = 9
 }
 
+internal enum ChaosEffect
+{
+    FullStamina = 0,
+    InfiniteStamina = 1,
+    GlobalAdrenaline = 2,
+    GlobalUnconscious = 3,
+    PlayerSwap = 4,
+    PreviousCampfire = 5,
+    MiddleCampfire = 6
+}
+
 internal static class CampfireAbilityInfo
 {
     internal static string GetName(CampfireAbility ability)
