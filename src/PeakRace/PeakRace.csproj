@@ -19,6 +19,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Resources\armband" />
     <EmbeddedResource Include="Resources\teamkiosk" />
+    <EmbeddedResource Include="Resources\AbilityIcons\*.png" />
   </ItemGroup>
 
   <!--

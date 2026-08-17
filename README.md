@@ -60,6 +60,8 @@ Each personally completed campfire replaces the racer's previous main ability wi
 - **Ghost Runner** lets a ghost penalize the living racer they are spectating for 15 seconds.
 - **Mega Launch** starts a five-second countdown, then applies a physical impulse in the current look direction. It is reusable after a configurable cooldown.
 
+The in-run HUD uses a dedicated icon for every ability and for Chaos. Ready active abilities have a bright frame, passive abilities use a blue frame, and a cooling-down Mega Launch is dimmed with remaining seconds plus a filling readiness bar. A consumed or not-yet-earned slot is shown as empty.
+
 The last racer to personally activate each campfire also receives one separate **Chaos** charge, stored in addition to the main slot and activated with **C** by default. Its configurable weighted roll can restore stamina, grant global Adrenaline, knock everyone unconscious, swap racers between recorded safe positions, or move racers to a previous or middle campfire. Only one Chaos charge can be stored.
 
 Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Its host-configurable per-item chance rises from **1.5%** for the leader to **18%** for a racer far behind. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
