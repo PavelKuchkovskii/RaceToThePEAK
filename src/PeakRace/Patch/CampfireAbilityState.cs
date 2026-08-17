@@ -104,6 +104,28 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         photonView.RPC(nameof(RPCA_RequestSecondWind), RpcTarget.MasterClient);
     }
 
+    internal void RequestHiddenMegaLaunchFoodConsumption(int itemViewId)
+    {
+        if (character == null
+            || !photonView.IsMine
+            || itemViewId <= 0)
+        {
+            return;
+        }
+
+        if (!PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient)
+        {
+            CampfireAbilityManager.Instance
+                ?.HandleHiddenMegaLaunchFoodConsumed(itemViewId, character);
+            return;
+        }
+
+        photonView.RPC(
+            nameof(RPCA_RequestHiddenMegaLaunchFoodConsumption),
+            RpcTarget.MasterClient,
+            itemViewId);
+    }
+
     internal void SendAdrenaline()
     {
         if (!PhotonNetwork.InRoom)
@@ -621,6 +643,22 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         }
 
         CampfireAbilityManager.Instance?.HandleUseRequest(character, chaosSlot);
+    }
+
+    [PunRPC]
+    private void RPCA_RequestHiddenMegaLaunchFoodConsumption(
+        int itemViewId,
+        PhotonMessageInfo messageInfo)
+    {
+        if (!IsOwnerRequest(messageInfo))
+        {
+            Plugin.Log.LogWarning(
+                "Rejected an unauthorized hidden Mega Launch food request.");
+            return;
+        }
+
+        CampfireAbilityManager.Instance
+            ?.HandleHiddenMegaLaunchFoodConsumed(itemViewId, character);
     }
 
     private bool IsOwnerRequest(PhotonMessageInfo messageInfo)

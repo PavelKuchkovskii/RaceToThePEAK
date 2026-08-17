@@ -26,6 +26,11 @@ internal static class PvpChestRefreshPatch
                 typeof(PvpChestRefreshPatch),
                 nameof(BeforeItemConsumed)));
         harmony.Patch(
+            AccessTools.Method(typeof(Action_Consume), nameof(Action_Consume.RunAction)),
+            prefix: new HarmonyMethod(
+                typeof(PvpChestRefreshPatch),
+                nameof(BeforeConsumeAction)));
+        harmony.Patch(
             AccessTools.Method(typeof(Item), "OnDestroy"),
             prefix: new HarmonyMethod(
                 typeof(PvpChestRefreshPatch),
@@ -55,9 +60,47 @@ internal static class PvpChestRefreshPatch
 
     private static void BeforeItemConsumed(Item __instance, int consumerID)
     {
-        CampfireAbilityManager.Instance?.HandleHiddenMegaLaunchFoodConsumed(
-            __instance,
-            consumerID);
+        PhotonView consumerView = PhotonNetwork.GetPhotonView(consumerID);
+        Character consumer = consumerView != null
+            ? consumerView.GetComponent<Character>()
+            : null;
+        RequestHiddenMegaLaunchFoodConsumption(__instance, consumer);
+    }
+
+    // PEAK 2.0 does not reliably reach Item.Consume on the client that owns
+    // every food action. RunAction is the authoritative point at which the
+    // completed consume interaction commits, before the delayed item RPC can
+    // deactivate or destroy the marked object.
+    private static void BeforeConsumeAction(Action_Consume __instance)
+    {
+        Item item = __instance != null
+            ? __instance.GetComponent<Item>()
+            : null;
+        RequestHiddenMegaLaunchFoodConsumption(
+            item,
+            item?.holderCharacter);
+    }
+
+    private static void RequestHiddenMegaLaunchFoodConsumption(
+        Item item,
+        Character consumer)
+    {
+        if (item == null
+            || consumer == null
+            || consumer.photonView == null
+            || !consumer.photonView.IsMine)
+        {
+            return;
+        }
+
+        PhotonView itemView = item.GetComponent<PhotonView>();
+        if (itemView == null || itemView.ViewID <= 0)
+        {
+            return;
+        }
+
+        consumer.GetComponent<CampfireAbilityState>()
+            ?.RequestHiddenMegaLaunchFoodConsumption(itemView.ViewID);
     }
 
     private static void BeforeItemDestroyed(Item __instance)

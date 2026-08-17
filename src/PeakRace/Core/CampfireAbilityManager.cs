@@ -1372,36 +1372,44 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             {
                 megaLaunchFoodViewIds.Add(view.ViewID);
                 Plugin.Log.LogInfo(
-                    $"Marked hidden Mega Launch food {view.ViewID} for "
+                    $"Marked hidden Mega Launch food {view.ViewID} "
+                    + $"({item.GetName()}) for "
                     + $"{opener.characterName} at {chancePercent:0.#}% odds.");
             }
         }
     }
 
-    internal void HandleHiddenMegaLaunchFoodConsumed(Item item, int consumerViewId)
+    internal void HandleHiddenMegaLaunchFoodConsumed(
+        int itemViewId,
+        Character consumer)
     {
-        PhotonView itemView = item != null ? item.GetComponent<PhotonView>() : null;
         if (!IsAuthority
-            || itemView == null
-            || !megaLaunchFoodViewIds.Remove(itemView.ViewID))
+            || itemViewId <= 0
+            || !megaLaunchFoodViewIds.Contains(itemViewId))
         {
             return;
         }
 
-        SetRoomProperty(MegaLaunchFoodKey(itemView.ViewID), null);
-        PhotonView consumerView = PhotonNetwork.GetPhotonView(consumerViewId);
-        Character consumer = consumerView != null
-            ? consumerView.GetComponent<Character>()
-            : null;
+        PhotonView itemView = PhotonNetwork.GetPhotonView(itemViewId);
+        Item item = itemView != null ? itemView.GetComponent<Item>() : null;
         if (!IsActivePlayerCharacter(consumer)
             || consumer.data == null
-            || consumer.data.dead)
+            || consumer.data.dead
+            || item == null
+            || (item.holderCharacter != consumer
+                && item.trueHolderCharacter != consumer))
         {
             Plugin.Log.LogWarning(
-                $"Hidden Mega Launch food {itemView.ViewID} had no valid consumer.");
+                $"Rejected hidden Mega Launch food {itemViewId}: "
+                + "the requesting player is not its current holder.");
             return;
         }
 
+        megaLaunchFoodViewIds.Remove(itemViewId);
+        SetRoomProperty(MegaLaunchFoodKey(itemViewId), null);
+        Plugin.Log.LogInfo(
+            $"Consumed hidden Mega Launch food {itemViewId} "
+            + $"({item.GetName()}) by {consumer.characterName}.");
         StartMegaLaunchCountdown(consumer, requiresAbility: false);
     }
 
