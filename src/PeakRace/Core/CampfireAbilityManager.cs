@@ -18,6 +18,7 @@ namespace PeakRace.Core;
 internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 {
     private const string AbilityKeyPrefix = "RTP.Ability.";
+    private const string InitialAbilityGrantedKeyPrefix = "RTP.InitialAbilityGranted.";
     private const string ChaosKeyPrefix = "RTP.Chaos.";
     private const string ChaosFireKeyPrefix = "RTP.ChaosFire.";
     private const string ExhaustUntilKeyPrefix = "RTP.ExhaustUntil.";
@@ -38,6 +39,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const double SecondWindImmunitySeconds = 2d;
 
     private readonly Dictionary<int, CampfireAbility> abilities = new();
+    private readonly HashSet<int> initialAbilityActors = new();
     private readonly HashSet<int> chaosActors = new();
     private readonly HashSet<int> chaosAwardedCampfires = new();
     private readonly Dictionary<int, double> exhaustedUntil = new();
@@ -536,6 +538,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
 
         clearedOutsideRun = false;
+        GrantInitialAbilities();
         RefreshCatchUpMultipliers();
         RefreshSafePositions();
         if (!initialized
@@ -574,6 +577,57 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         {
             state.RequestUse(chaosSlot: true);
         }
+    }
+
+    private void GrantInitialAbilities()
+    {
+        if (!initialized
+            || !IsAuthority
+            || RaceSettingsManager.Current.Mode != RespawnMode.Pvp)
+        {
+            return;
+        }
+
+        foreach (Character character in GetActivePlayerCharacters())
+        {
+            int actorNumber = GetActorNumber(character);
+            if (actorNumber == 0 || initialAbilityActors.Contains(actorNumber))
+            {
+                continue;
+            }
+
+            CampfireAbility awarded = RollAbility();
+            if (!SetInitialAbility(actorNumber, awarded))
+            {
+                continue;
+            }
+
+            NotifyAward(character, CampfireAbilityInfo.GetName(awarded), isChaos: false);
+            Plugin.Log.LogInfo(
+                $"{character.characterName} received starting ability "
+                + $"{CampfireAbilityInfo.GetName(awarded)}.");
+        }
+    }
+
+    private bool SetInitialAbility(int actorNumber, CampfireAbility ability)
+    {
+        if (PhotonNetwork.InRoom
+            && (PhotonNetwork.CurrentRoom == null
+                || !PhotonNetwork.CurrentRoom.SetCustomProperties(new Hashtable
+                {
+                    [AbilityKey(actorNumber)] = (int)ability,
+                    [InitialAbilityGrantedKey(actorNumber)] = true,
+                    [MegaCooldownUntilKey(actorNumber)] = 0d
+                })))
+        {
+            return false;
+        }
+
+        abilities[actorNumber] = ability;
+        initialAbilityActors.Add(actorNumber);
+        megaCooldownUntil.Remove(actorNumber);
+        pendingMegaLaunches.Remove(actorNumber);
+        return true;
     }
 
     internal void HandleCampfireCompleted(
@@ -1689,6 +1743,31 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     Plugin.Log.LogWarning($"Ignored malformed campfire ability '{key}'.");
                 }
             }
+            else if (TryParseSuffix(
+                key,
+                InitialAbilityGrantedKeyPrefix,
+                out int initialAbilityActor))
+            {
+                bool granted = false;
+                try
+                {
+                    granted = boxed != null && Convert.ToBoolean(boxed);
+                }
+                catch (Exception)
+                {
+                    Plugin.Log.LogWarning(
+                        $"Ignored malformed initial ability marker '{key}'.");
+                }
+
+                if (granted)
+                {
+                    initialAbilityActors.Add(initialAbilityActor);
+                }
+                else
+                {
+                    initialAbilityActors.Remove(initialAbilityActor);
+                }
+            }
             else if (TryParseSuffix(key, ChaosKeyPrefix, out int chaosActor))
             {
                 bool enabled = false;
@@ -1940,6 +2019,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private void ClearRunState(bool clearRoomProperties)
     {
         abilities.Clear();
+        initialAbilityActors.Clear();
         chaosActors.Clear();
         chaosAwardedCampfires.Clear();
         exhaustedUntil.Clear();
@@ -1968,6 +2048,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         {
             if (rawKey is string key
                 && (key.StartsWith(AbilityKeyPrefix, StringComparison.Ordinal)
+                    || key.StartsWith(
+                        InitialAbilityGrantedKeyPrefix,
+                        StringComparison.Ordinal)
                     || key.StartsWith(ChaosKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(ChaosFireKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(ExhaustUntilKeyPrefix, StringComparison.Ordinal)
@@ -2011,6 +2094,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     }
 
     private static string AbilityKey(int actorNumber) => AbilityKeyPrefix + actorNumber;
+
+    private static string InitialAbilityGrantedKey(int actorNumber) =>
+        InitialAbilityGrantedKeyPrefix + actorNumber;
 
     private static string ChaosKey(int actorNumber) => ChaosKeyPrefix + actorNumber;
 

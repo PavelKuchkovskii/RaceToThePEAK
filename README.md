@@ -50,6 +50,8 @@ Disconnected players and bots are excluded. A player who did not select a troop 
 
 Each personally completed campfire replaces the racer's previous main ability with one weighted random ability. Press **F** by default to use an active main ability; passive abilities work automatically. When PVP is selected, the host lobby panel shows every ability weight, Chaos weight, Mega Launch parameter and hidden-food chance. These rules synchronize to the room and lock when the run starts. The personal F/C key bindings remain configurable in RaceToThePeak's BepInEx config.
 
+At the beginning of every PVP run, each racer also receives one random main ability from the same weighted pool. This makes abilities available throughout the first biome. The starting grant happens once per racer and never includes a Chaos charge.
+
 - **Adrenaline** applies the original Lollipop and Energy Drink effects together.
 - **Shield** passively consumes itself to block the next directed Exhaust, Recall or Ghost Runner.
 - **Exhaust** targets a random racer ahead and raises their stamina consumption by 40% for 8 seconds. It is not consumed when no target exists.
