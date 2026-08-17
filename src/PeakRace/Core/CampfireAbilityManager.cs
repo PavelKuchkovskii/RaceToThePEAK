@@ -20,11 +20,16 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const string AbilityKeyPrefix = "RTP.Ability.";
     private const string ChaosKeyPrefix = "RTP.Chaos.";
     private const string ChaosFireKeyPrefix = "RTP.ChaosFire.";
+    private const string ExhaustUntilKeyPrefix = "RTP.ExhaustUntil.";
     private const float FeedbackSeconds = 3.5f;
+    private const double ExhaustDurationSeconds = 8d;
+    private const double SecondWindImmunitySeconds = 2d;
 
     private readonly Dictionary<int, CampfireAbility> abilities = new();
     private readonly HashSet<int> chaosActors = new();
     private readonly HashSet<int> chaosAwardedCampfires = new();
+    private readonly Dictionary<int, double> exhaustedUntil = new();
+    private readonly Dictionary<int, double> secondWindImmunityUntil = new();
     private readonly Dictionary<CampfireAbility, ConfigEntry<float>> abilityWeights = new();
 
     private ConfigEntry<Key> abilityKeyConfig;
@@ -206,12 +211,182 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         {
             NotifyMessage(character, "PASSIVE ABILITY", Plugin.Color);
         }
+        else if (character.data == null
+            || character.data.dead
+            || character.data.fullyPassedOut)
+        {
+            NotifyMessage(character, "ABILITY REQUIRES A LIVING SCOUT", Color.gray);
+        }
         else
         {
-            // The inventory and authentication boundary are deliberately
-            // complete before individual effects are attached.
-            NotifyMessage(character, $"{CampfireAbilityInfo.GetName(ability)} READY", Plugin.Color);
+            ActivateMainAbility(character, ability);
         }
+    }
+
+    internal void HandleSecondWindRequest(Character character)
+    {
+        if (!IsAuthority
+            || RaceSettingsManager.Current.Mode != RespawnMode.Pvp
+            || GetAbility(character) != CampfireAbility.SecondWind
+            || character?.data == null
+            || character.data.dead
+            || character.data.shouldPetrify
+            || (!character.data.passedOut && !character.data.fullyPassedOut))
+        {
+            return;
+        }
+
+        CampfireAbilityState state = character.GetComponent<CampfireAbilityState>();
+        if (state == null)
+        {
+            return;
+        }
+
+        double immunityUntil = NetworkTime + SecondWindImmunitySeconds;
+        SetAbility(character, CampfireAbility.None);
+        state.SendSecondWindRecovery(immunityUntil);
+        NotifyMessage(character, "SECOND WIND", Plugin.Color);
+    }
+
+    internal bool IsExhausted(Character character)
+    {
+        return exhaustedUntil.TryGetValue(
+                GetActorNumber(character),
+                out double deadline)
+            && NetworkTime < deadline;
+    }
+
+    internal bool HasSecondWindImmunity(Character character)
+    {
+        return secondWindImmunityUntil.TryGetValue(
+                GetActorNumber(character),
+                out double deadline)
+            && NetworkTime < deadline;
+    }
+
+    internal void MarkSecondWindImmunity(Character character, double deadline)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (actorNumber > 0 && deadline > NetworkTime)
+        {
+            secondWindImmunityUntil[actorNumber] = deadline;
+        }
+    }
+
+    private void ActivateMainAbility(Character user, CampfireAbility ability)
+    {
+        switch (ability)
+        {
+            case CampfireAbility.Adrenaline:
+                user.GetComponent<CampfireAbilityState>()?.SendAdrenaline();
+                ConsumeMainAbility(user, ability);
+                NotifyMessage(user, "ADRENALINE ACTIVATED", Plugin.Color);
+                break;
+
+            case CampfireAbility.Exhaust:
+                ActivateExhaust(user);
+                break;
+
+            case CampfireAbility.ChaosHorn:
+                ActivateChaosHorn(user);
+                break;
+
+            default:
+                NotifyMessage(
+                    user,
+                    $"{CampfireAbilityInfo.GetName(ability)} IS NOT READY",
+                    Color.gray);
+                break;
+        }
+    }
+
+    private void ActivateExhaust(Character user)
+    {
+        float userProgress = RaceProgress.ForCharacter(user).Score;
+        List<Character> candidates = GetActivePlayerCharacters()
+            .Where(candidate => candidate != user
+                && candidate.data != null
+                && !candidate.data.dead
+                && RaceProgress.ForCharacter(candidate).Score > userProgress + 0.01f)
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            NotifyMessage(user, "NO VALID TARGET", Color.gray);
+            return;
+        }
+
+        Character target = candidates[UnityEngine.Random.Range(0, candidates.Count)];
+        bool blocked = TryBlockDirectedAttack(user, target);
+        ConsumeMainAbility(user, CampfireAbility.Exhaust);
+        if (blocked)
+        {
+            return;
+        }
+
+        double deadline = Math.Max(
+            exhaustedUntil.TryGetValue(GetActorNumber(target), out double current)
+                ? current
+                : 0d,
+            NetworkTime + ExhaustDurationSeconds);
+        SetExhaustedUntil(target, deadline);
+        NotifyMessage(user, $"EXHAUST HIT {target.characterName}", Plugin.Color);
+        NotifyMessage(target, "EXHAUSTED  •  8 SECONDS", new Color(1f, 0.55f, 0.2f, 1f));
+    }
+
+    private void ActivateChaosHorn(Character user)
+    {
+        int affected = 0;
+        foreach (Character target in GetActivePlayerCharacters())
+        {
+            if (target == user
+                || target.data == null
+                || target.data.dead
+                || target.IsGhost)
+            {
+                continue;
+            }
+
+            target.GetComponent<CampfireAbilityState>()?.SendRemoveExtraStamina();
+            NotifyMessage(target, "CHAOS HORN  •  BONUS STAMINA LOST", new Color(1f, 0.4f, 0.2f, 1f));
+            affected++;
+        }
+
+        ConsumeMainAbility(user, CampfireAbility.ChaosHorn);
+        NotifyMessage(user, $"CHAOS HORN HIT {affected} PLAYER(S)", Plugin.Color);
+    }
+
+    internal bool TryBlockDirectedAttack(Character attacker, Character target)
+    {
+        if (GetAbility(target) != CampfireAbility.Shield)
+        {
+            return false;
+        }
+
+        SetAbility(target, CampfireAbility.None);
+        NotifyMessage(attacker, "ATTACK BLOCKED", new Color(1f, 0.45f, 0.25f, 1f));
+        NotifyMessage(target, "SHIELD USED", Plugin.Color);
+        return true;
+    }
+
+    private void ConsumeMainAbility(Character character, CampfireAbility expected)
+    {
+        if (!CampfireAbilityInfo.IsReusable(expected)
+            && GetAbility(character) == expected)
+        {
+            SetAbility(character, CampfireAbility.None);
+        }
+    }
+
+    private void SetExhaustedUntil(Character character, double deadline)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (actorNumber == 0
+            || !SetRoomProperty(ExhaustUntilKey(actorNumber), deadline))
+        {
+            return;
+        }
+
+        exhaustedUntil[actorNumber] = deadline;
     }
 
     internal CampfireAbility GetAbility(Character character)
@@ -452,6 +627,26 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     chaosAwardedCampfires.Remove(campfireIndex);
                 }
             }
+            else if (TryParseSuffix(key, ExhaustUntilKeyPrefix, out int exhaustedActor))
+            {
+                try
+                {
+                    double deadline = boxed != null ? Convert.ToDouble(boxed) : 0d;
+                    if (deadline > NetworkTime)
+                    {
+                        exhaustedUntil[exhaustedActor] = deadline;
+                    }
+                    else
+                    {
+                        exhaustedUntil.Remove(exhaustedActor);
+                    }
+                }
+                catch (Exception)
+                {
+                    exhaustedUntil.Remove(exhaustedActor);
+                    Plugin.Log.LogWarning($"Ignored malformed Exhaust deadline '{key}'.");
+                }
+            }
         }
     }
 
@@ -468,6 +663,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         abilities.Clear();
         chaosActors.Clear();
         chaosAwardedCampfires.Clear();
+        exhaustedUntil.Clear();
+        secondWindImmunityUntil.Clear();
         feedbackText = null;
 
         if (!clearRoomProperties
@@ -484,7 +681,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             if (rawKey is string key
                 && (key.StartsWith(AbilityKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(ChaosKeyPrefix, StringComparison.Ordinal)
-                    || key.StartsWith(ChaosFireKeyPrefix, StringComparison.Ordinal)))
+                    || key.StartsWith(ChaosFireKeyPrefix, StringComparison.Ordinal)
+                    || key.StartsWith(ExhaustUntilKeyPrefix, StringComparison.Ordinal)))
             {
                 removals[key] = null;
             }
@@ -526,6 +724,13 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private static string ChaosKey(int actorNumber) => ChaosKeyPrefix + actorNumber;
 
     private static string ChaosFireKey(int campfireIndex) => ChaosFireKeyPrefix + campfireIndex;
+
+    private static string ExhaustUntilKey(int actorNumber) =>
+        ExhaustUntilKeyPrefix + actorNumber;
+
+    private static double NetworkTime => PhotonNetwork.InRoom
+        ? PhotonNetwork.Time
+        : Time.unscaledTime;
 
     private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
     {

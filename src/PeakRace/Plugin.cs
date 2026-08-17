@@ -104,6 +104,7 @@ public partial class Plugin : BaseUnityPlugin
         Log.LogInfo("Character Team Handler Successful");
 
         harmony.PatchAll(typeof(CampfireAbilityState));
+        harmony.PatchAll(typeof(CampfireAbilityPatch));
         Log.LogInfo("Campfire Ability State Successful");
 
         harmony.PatchAll(typeof(RespawnPatch));
