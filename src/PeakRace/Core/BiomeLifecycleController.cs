@@ -19,6 +19,7 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
 
     internal static BiomeLifecycleController Instance { get; private set; }
 
+    private readonly ScopedTransitionAccessController transitionAccess = new();
     private float nextReconcileTime;
     private MapHandler cachedMap;
     private int lastRetainedFloor = -1;
@@ -64,6 +65,7 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
 
         if (cachedMap != map)
         {
+            transitionAccess.Reset();
             cachedMap = map;
             lastRetainedFloor = -1;
         }
@@ -74,7 +76,8 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
             map.segments.Length - 1);
         int retainedFloor = DetermineRetainedFloor(map, currentSegment);
         ApplySegmentRetention(map, currentSegment, retainedFloor);
-        ApplyLocalBoundaries(map, currentSegment);
+        OpenLoadedBoundaries(map, currentSegment);
+        transitionAccess.Reconcile(map, currentSegment);
 
         if (retainedFloor != lastRetainedFloor)
         {
@@ -180,37 +183,23 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
         }
     }
 
-    private static void ApplyLocalBoundaries(MapHandler map, int currentSegment)
+    private static void OpenLoadedBoundaries(MapHandler map, int currentSegment)
     {
-        Character localCharacter = Character.localCharacter;
-        CampfireProgressionController progression = CampfireProgressionController.Instance;
-        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
-        int localProgress = localCharacter != null && progression != null
-            ? progression.GetCompletedCampfireIndex(localCharacter)
-            : -1;
-
         for (int destinationSegment = 1;
             destinationSegment <= currentSegment;
             destinationSegment++)
         {
-            int requiredCampfire = destinationSegment - 1;
-            bool hasAccess = !settings.UsesPersonalCampfireClaims
-                    && settings.WaitMode == CampfireWaitMode.Nobody
-                || localProgress >= requiredCampfire;
-            bool shouldBlock = !hasAccess;
-
-            // MapHandler has globally loaded this transition, so its source-side
-            // wall must stay open. Re-enabling it for a lagging player can place
-            // the wall before the campfire and make the required interaction
-            // physically unreachable. The destination-side wall is the local
-            // access gate: it still prevents entering the next biome until this
-            // player/team has completed the already-lit checkpoint.
+            // Both objects are broad vanilla biome seals, not precise checkpoint
+            // gates. Either one can overlap the campfire approach and strand a
+            // racer below an already-lit fire. Once MapHandler has loaded the
+            // destination, keep the passed transition physically open and let
+            // the host-authoritative progression guard below enforce access.
             SetActiveIfDifferent(
                 map.segments[destinationSegment - 1].wallNext,
                 false);
             SetActiveIfDifferent(
                 map.segments[destinationSegment].wallPrevious,
-                shouldBlock);
+                false);
         }
 
         // The next globally unloaded segment stays protected for everybody.
@@ -248,6 +237,7 @@ internal sealed class BiomeLifecycleController : MonoBehaviour
     {
         cachedMap = null;
         lastRetainedFloor = -1;
+        transitionAccess.Reset();
     }
 
     private void OnDestroy()
