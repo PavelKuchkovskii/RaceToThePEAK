@@ -90,7 +90,7 @@ Weights are relative rather than percentages. Setting a weight to `0` disables t
 | **Recall** | Active, one use | 10 | After a warning, returns the living leader to their previous campfire when the lead is at least one checkpoint or otherwise large enough. |
 | **Chaos Horn** | Active, one use | 10 | Removes bonus stamina from every other living non-ghost racer. This is a main ability, not the separate Chaos slot. |
 | **Ghost Runner** | Active, one use | 8 | While the owner is a ghost, increases the spectated living target's stamina use by 20% for 15 seconds. |
-| **Mega Launch** | Active, reusable | 12 | After a five-second countdown, ragdolls and throws the owner in their current look direction. Launch velocity and cooldown are host-configurable. |
+| **Mega Launch** | Active, reusable | 12 | After a five-second countdown, ragdolls and throws the owner in their current look direction. Target travel distance and cooldown are host-configurable; terrain and collisions can shorten the flight. |
 
 ### Chaos effects
 
@@ -118,7 +118,7 @@ The following controls appear in the host's **F3** lobby panel only while **PVP*
 - Optional opened-luggage refresh and its delay.
 - Optional **Test mode** (off by default), which exposes host-only in-run controls for rerolling every active player's main Ability and giving every active player one Chaos charge.
 - Relative weight for every main ability and every Chaos effect.
-- Mega Launch cooldown and launch force.
+- Mega Launch cooldown and target travel distance in metres.
 - Hidden Mega Launch Food chances for the leader, middle, near-last, last-place and far-behind tiers.
 
 These rules synchronize to all clients, remain stable if the host changes and lock when the run starts. Personal **F/C** key bindings are not controlled by the host.

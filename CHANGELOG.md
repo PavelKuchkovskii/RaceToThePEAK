@@ -16,7 +16,7 @@
 * Made Shield consume itself to protect its owner from Chaos Horn without removing their bonus stamina.
 * Reworked transition access so lagging clients keep PEAK's oversized future-biome seal open until they claim the previous fire. No custom world-sized collider is created; the master client now corrects an unclaimed racer immediately beyond PEAK's destination progress plane without blocking the campfire approach.
 * Fixed first-biome race scores so directed abilities such as Exhaust can identify racers ahead while the user is still on the beach.
-* Fixed Mega Launch for PEAK 2.0: it uses the owner's camera direction, enters the game's cannon-style ragdoll state, then applies a direct mass-independent velocity change to every owned body instead of PEAK's force buffer, which discards the requested force mode.
+* Fixed Mega Launch for PEAK 2.0: its setting now represents target travel distance in metres. It uses the owner's camera direction, enters the game's cannon-style ragdoll state and assigns every owned body a gravity-compensated ballistic velocity instead of using PEAK's force buffer, which discards the requested force mode. Terrain and collisions can still shorten the flight.
 
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.

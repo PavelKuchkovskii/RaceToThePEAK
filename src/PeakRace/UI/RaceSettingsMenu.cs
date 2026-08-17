@@ -467,11 +467,11 @@ internal sealed class RaceSettingsMenu : MenuWindow
             DrawFloatRow(
                 width,
                 ref y,
-                "Launch force",
-                abilityManager.MegaLaunchForce,
-                string.Empty,
-                () => abilityManager.AdjustMegaLaunchForce(-5f),
-                () => abilityManager.AdjustMegaLaunchForce(5f));
+                "Launch distance",
+                abilityManager.MegaLaunchDistanceMeters,
+                "m",
+                () => abilityManager.AdjustMegaLaunchDistance(-5f),
+                () => abilityManager.AdjustMegaLaunchDistance(5f));
 
             DrawDivider(width, ref y);
             DrawSectionTitle("HIDDEN MEGA LAUNCH FOOD", width, ref y);

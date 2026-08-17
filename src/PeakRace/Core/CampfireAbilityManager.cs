@@ -28,7 +28,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const string RuleAbilityWeightPrefix = "RTP.PvpRule.AbilityWeight.";
     private const string RuleChaosWeightPrefix = "RTP.PvpRule.ChaosWeight.";
     private const string RuleMegaCooldownKey = "RTP.PvpRule.MegaCooldown";
-    private const string RuleMegaForceKey = "RTP.PvpRule.MegaForce";
+    // Keep the legacy room-property key so existing room/config values retain
+    // their numeric selection. The value now represents metres.
+    private const string RuleMegaDistanceKey = "RTP.PvpRule.MegaForce";
     private const string RuleMegaFoodLeaderKey = "RTP.PvpRule.FoodLeader";
     private const string RuleMegaFoodMiddleKey = "RTP.PvpRule.FoodMiddle";
     private const string RuleMegaFoodNearLastKey = "RTP.PvpRule.FoodNearLast";
@@ -59,14 +61,14 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private ConfigEntry<Key> abilityKeyConfig;
     private ConfigEntry<Key> chaosKeyConfig;
     private ConfigEntry<float> megaLaunchCooldownConfig;
-    private ConfigEntry<float> megaLaunchForceConfig;
+    private ConfigEntry<float> megaLaunchDistanceConfig;
     private ConfigEntry<float> megaFoodLeaderChanceConfig;
     private ConfigEntry<float> megaFoodMiddleChanceConfig;
     private ConfigEntry<float> megaFoodNearLastChanceConfig;
     private ConfigEntry<float> megaFoodLastChanceConfig;
     private ConfigEntry<float> megaFoodFarBehindChanceConfig;
     private float activeMegaLaunchCooldown;
-    private float activeMegaLaunchForce;
+    private float activeMegaLaunchDistance;
     private float activeMegaFoodLeaderChance;
     private float activeMegaFoodMiddleChance;
     private float activeMegaFoodNearLastChance;
@@ -138,12 +140,13 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             new ConfigDescription(
                 "Cooldown between uses of the reusable Mega Launch ability.",
                 new AcceptableValueRange<float>(5f, 300f)));
-        megaLaunchForceConfig = config.Bind(
+        // Keep the legacy config key to preserve existing host selections.
+        megaLaunchDistanceConfig = config.Bind(
             "PVP Abilities",
             "MegaLaunchForce",
             75f,
             new ConfigDescription(
-                "Launch power converted into a direct, mass-independent velocity change.",
+                "Target Mega Launch travel distance in metres before collisions and terrain.",
                 new AcceptableValueRange<float>(10f, 250f)));
         megaFoodLeaderChanceConfig = BindMegaFoodChance(
             config,
@@ -221,7 +224,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
     internal float MegaLaunchCooldownSeconds => activeMegaLaunchCooldown;
 
-    internal float MegaLaunchForce => activeMegaLaunchForce;
+    internal float MegaLaunchDistanceMeters => activeMegaLaunchDistance;
 
     internal float GetMegaLaunchFoodChance(MegaLaunchFoodChanceTier tier)
     {
@@ -263,12 +266,12 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
     }
 
-    internal void AdjustMegaLaunchForce(float delta)
+    internal void AdjustMegaLaunchDistance(float delta)
     {
         if (CanEditPvpRules)
         {
-            megaLaunchForceConfig.Value = Mathf.Clamp(
-                megaLaunchForceConfig.Value + delta,
+            megaLaunchDistanceConfig.Value = Mathf.Clamp(
+                megaLaunchDistanceConfig.Value + delta,
                 10f,
                 250f);
         }
@@ -362,8 +365,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             megaLaunchCooldownConfig.Value,
             5f,
             300f);
-        activeMegaLaunchForce = Mathf.Clamp(
-            megaLaunchForceConfig.Value,
+        activeMegaLaunchDistance = Mathf.Clamp(
+            megaLaunchDistanceConfig.Value,
             10f,
             250f);
         activeMegaFoodLeaderChance = Mathf.Clamp(
@@ -417,7 +420,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         ConfigEntry<float>[] scalarEntries =
         {
             megaLaunchCooldownConfig,
-            megaLaunchForceConfig,
+            megaLaunchDistanceConfig,
             megaFoodLeaderChanceConfig,
             megaFoodMiddleChanceConfig,
             megaFoodNearLastChanceConfig,
@@ -458,7 +461,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             }
 
             megaLaunchCooldownConfig.Value = activeMegaLaunchCooldown;
-            megaLaunchForceConfig.Value = activeMegaLaunchForce;
+            megaLaunchDistanceConfig.Value = activeMegaLaunchDistance;
             megaFoodLeaderChanceConfig.Value = activeMegaFoodLeaderChance;
             megaFoodMiddleChanceConfig.Value = activeMegaFoodMiddleChance;
             megaFoodNearLastChanceConfig.Value = activeMegaFoodNearLastChance;
@@ -502,7 +505,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         Hashtable properties = new()
         {
             [RuleMegaCooldownKey] = activeMegaLaunchCooldown,
-            [RuleMegaForceKey] = activeMegaLaunchForce,
+            [RuleMegaDistanceKey] = activeMegaLaunchDistance,
             [RuleMegaFoodLeaderKey] = activeMegaFoodLeaderChance,
             [RuleMegaFoodMiddleKey] = activeMegaFoodMiddleChance,
             [RuleMegaFoodNearLastKey] = activeMegaFoodNearLastChance,
@@ -1324,10 +1327,10 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
         int actorNumber = GetActorNumber(user);
         double launchAt = NetworkTime + 5d;
-        float force = activeMegaLaunchForce;
+        float distanceMeters = activeMegaLaunchDistance;
         pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(
             launchAt,
-            force,
+            distanceMeters,
             requiresAbility: true);
         SetMegaCooldownUntil(user, NetworkTime + activeMegaLaunchCooldown);
         user.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
@@ -1424,7 +1427,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         double launchAt = NetworkTime + 5d;
         pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(
             launchAt,
-            activeMegaLaunchForce,
+            activeMegaLaunchDistance,
             requiresAbility);
         character.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
     }
@@ -1498,7 +1501,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             ? direction.normalized
             : character.data.lookDirection.normalized;
         character.GetComponent<CampfireAbilityState>()
-            ?.SendMegaLaunchImpulse(launchDirection, pending.Force);
+            ?.SendMegaLaunchImpulse(
+                launchDirection,
+                pending.DistanceMeters);
         NotifyMessage(character, "MEGA LAUNCH", Plugin.Color);
     }
 
@@ -2040,11 +2045,11 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             }
             return true;
         }
-        if (key == RuleMegaForceKey)
+        if (key == RuleMegaDistanceKey)
         {
             if (TryConvertRuleFloat(key, boxed, 10f, 250f, out scalar))
             {
-                activeMegaLaunchForce = scalar;
+                activeMegaLaunchDistance = scalar;
             }
             return true;
         }
@@ -2326,17 +2331,17 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     {
         internal PendingMegaLaunch(
             double launchAt,
-            float force,
+            float distanceMeters,
             bool requiresAbility)
         {
             LaunchAt = launchAt;
-            Force = force;
+            DistanceMeters = distanceMeters;
             RequiresAbility = requiresAbility;
         }
 
         internal double LaunchAt { get; }
 
-        internal float Force { get; }
+        internal float DistanceMeters { get; }
 
         internal bool RequiresAbility { get; }
     }

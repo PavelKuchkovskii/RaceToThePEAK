@@ -17,8 +17,10 @@ namespace PeakRace.Patch;
 [HarmonyPatch]
 internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 {
-    private const float MegaLaunchVelocityScale = 0.2f;
-    private const float MegaLaunchRagdollSeconds = 3f;
+    private const float MegaLaunchTargetSpeed = 30f;
+    private const float MegaLaunchMinimumFlightSeconds = 1.25f;
+    private const float MegaLaunchMaximumFlightSeconds = 4f;
+    private const float MegaLaunchLandingBufferSeconds = 1f;
 
     private static readonly CharacterAfflictions.STATUSTYPE[]
         SecondWindTemporaryStatuses =
@@ -181,11 +183,13 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             launchAt);
     }
 
-    internal void SendMegaLaunchImpulse(Vector3 direction, float force)
+    internal void SendMegaLaunchImpulse(
+        Vector3 direction,
+        float distanceMeters)
     {
         if (!PhotonNetwork.InRoom)
         {
-            ApplyMegaLaunchImpulse(direction, force);
+            ApplyMegaLaunchImpulse(direction, distanceMeters);
             return;
         }
 
@@ -193,7 +197,7 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             nameof(RPCA_ApplyMegaLaunchImpulse),
             RpcTarget.All,
             direction,
-            force);
+            distanceMeters);
     }
 
     private void RequestMegaLaunchImpulse(Vector3 direction)
@@ -243,12 +247,12 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
     [PunRPC]
     private void RPCA_ApplyMegaLaunchImpulse(
         Vector3 direction,
-        float force,
+        float distanceMeters,
         PhotonMessageInfo messageInfo)
     {
         if (AbilityRpcValidation.IsAuthorityMessage(messageInfo))
         {
-            ApplyMegaLaunchImpulse(direction, force);
+            ApplyMegaLaunchImpulse(direction, distanceMeters);
         }
     }
 
@@ -276,30 +280,48 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         RequestMegaLaunchImpulse(direction);
     }
 
-    private void ApplyMegaLaunchImpulse(Vector3 direction, float force)
+    private void ApplyMegaLaunchImpulse(
+        Vector3 direction,
+        float distanceMeters)
     {
         if (character == null || character.data == null || character.data.dead)
         {
             return;
         }
 
+        float safeDistance = float.IsNaN(distanceMeters)
+                || float.IsInfinity(distanceMeters)
+            ? 75f
+            : Mathf.Clamp(distanceMeters, 10f, 250f);
+        float flightSeconds = Mathf.Clamp(
+            safeDistance / MegaLaunchTargetSpeed,
+            MegaLaunchMinimumFlightSeconds,
+            MegaLaunchMaximumFlightSeconds);
         StartCoroutine(MaintainMegaLaunchProtection());
 
         // PEAK's own scout cannon disables active ragdoll control before
         // launching. Without this transition, standing and movement forces can
         // absorb an impulse while the character is still touching the ground.
         character.data.launchedByCannon = true;
-        character.RPCA_Fall(MegaLaunchRagdollSeconds, 0f);
+        character.RPCA_Fall(
+            flightSeconds + MegaLaunchLandingBufferSeconds,
+            0f);
         if (!photonView.IsMine)
         {
             return;
         }
 
         character.refs.movement.CapFallDamage(0f, 15f);
-        StartCoroutine(ApplyMegaLaunchVelocity(direction, force));
+        StartCoroutine(ApplyMegaLaunchVelocity(
+            direction,
+            safeDistance,
+            flightSeconds));
     }
 
-    private IEnumerator ApplyMegaLaunchVelocity(Vector3 direction, float force)
+    private IEnumerator ApplyMegaLaunchVelocity(
+        Vector3 direction,
+        float distanceMeters,
+        float flightSeconds)
     {
         // Let Character.FixedUpdate observe fallSeconds and release active
         // ragdoll control before changing velocity.
@@ -320,19 +342,16 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             safeDirection = Vector3.forward;
         }
         safeDirection.Normalize();
-        float safeForce = float.IsNaN(force) || float.IsInfinity(force)
-            ? 75f
-            : Mathf.Clamp(force, 10f, 250f);
         Vector3 launchVelocity = safeDirection
-            * safeForce
-            * MegaLaunchVelocityScale;
-        int acceleratedBodies = 0;
+                * (distanceMeters / flightSeconds)
+            - Physics.gravity * (0.5f * flightSeconds);
+        int launchedBodies = 0;
 
         // Bodypart.AddForce does not preserve its ForceMode argument in PEAK
         // 2.0: it buffers the vector and later always applies ForceMode.Force.
-        // Apply VelocityChange to the owned rigidbodies directly so the launch
-        // is instantaneous, mass-independent and cannot collapse into a tiny
-        // one-frame push.
+        // Assign every owned rigidbody the same ballistic velocity directly.
+        // Ignoring collisions, gravity then places the character the configured
+        // number of metres along the camera direction after flightSeconds.
         foreach (Bodypart bodypart in character.refs.ragdoll.partList)
         {
             Rigidbody body = bodypart?.Rig;
@@ -342,11 +361,11 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             }
 
             body.WakeUp();
-            body.AddForce(launchVelocity, ForceMode.VelocityChange);
-            acceleratedBodies++;
+            body.linearVelocity = launchVelocity;
+            launchedBodies++;
         }
 
-        if (acceleratedBodies == 0)
+        if (launchedBodies == 0)
         {
             Plugin.Log.LogError(
                 $"Mega Launch could not find a dynamic body for {character.characterName}.");
@@ -358,8 +377,9 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 
         Plugin.Log.LogInfo(
             $"Applied Mega Launch to {character.characterName}: "
+            + $"target {distanceMeters:0.#} m over {flightSeconds:0.##} s, "
             + $"velocity {launchVelocity.magnitude:0.##} m/s across "
-            + $"{acceleratedBodies} bodies.");
+            + $"{launchedBodies} bodies.");
     }
 
     private bool IsFinite(Vector3 value)
