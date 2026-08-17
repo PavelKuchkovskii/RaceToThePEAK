@@ -1,3 +1,13 @@
+### 0.10.0
+* Replaced PVP's selectable group waiting policy with mandatory personal campfire claims: every racer can activate immediately, but cannot cross until their own sequential claim succeeds.
+* Added one-slot, master-authoritative Campfire Ability inventory synchronized through Photon room properties; each new campfire roll replaces the previous main ability.
+* Added Adrenaline, Shield, Exhaust, Second Wind, Catch Up, Recall, Chaos Horn, Ghost Runner and reusable Mega Launch, with configurable activation keys and weighted rolls.
+* Added race-progress-aware targeting and catch-up scaling based on earned checkpoints plus normalized progress through the current segment.
+* Added a separate one-charge Chaos slot for the last racer at each campfire, with configurable Full Stamina, Infinite Stamina, Global Adrenaline, Global Unconscious, safe Player Swap, Previous Campfire and Middle Campfire effects.
+* Added hidden Mega Launch food to ordinary non-critical luggage food. Position-based chances are configurable from leader through far-behind, and the item remains visually indistinguishable until consumed.
+* Added synchronized ability HUD feedback, timed status effects, shield consumption, Mega Launch cooldown/countdown and short unconscious protection around launches.
+* Removed PVP next-campfire death respawning because it would bypass the dead racer's mandatory personal activation; legacy/configured values migrate to previous-campfire respawning.
+
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.
 * Added host-authoritative, monotonic player/team/lobby checkpoint progress with Photon late-join and host-migration synchronization.
