@@ -123,6 +123,152 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             immunityUntil);
     }
 
+    internal void SendMegaLaunchCountdown(double launchAt)
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            if (photonView.IsMine)
+            {
+                StartCoroutine(MegaLaunchCountdown(launchAt));
+            }
+            return;
+        }
+
+        photonView.RPC(
+            nameof(RPCA_StartMegaLaunchCountdown),
+            RpcTarget.All,
+            launchAt);
+    }
+
+    internal void SendMegaLaunchImpulse(Vector3 direction, float force)
+    {
+        if (!PhotonNetwork.InRoom)
+        {
+            ApplyMegaLaunchImpulse(direction, force);
+            return;
+        }
+
+        photonView.RPC(
+            nameof(RPCA_ApplyMegaLaunchImpulse),
+            RpcTarget.All,
+            direction,
+            force);
+    }
+
+    private void RequestMegaLaunchImpulse(Vector3 direction)
+    {
+        if (!PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient)
+        {
+            CampfireAbilityManager.Instance?.HandleMegaLaunchImpulseRequest(
+                character,
+                direction);
+            return;
+        }
+
+        photonView.RPC(
+            nameof(RPCA_RequestMegaLaunchImpulse),
+            RpcTarget.MasterClient,
+            direction);
+    }
+
+    [PunRPC]
+    private void RPCA_StartMegaLaunchCountdown(
+        double launchAt,
+        PhotonMessageInfo messageInfo)
+    {
+        if (AbilityRpcValidation.IsAuthorityMessage(messageInfo)
+            && photonView.IsMine)
+        {
+            StartCoroutine(MegaLaunchCountdown(launchAt));
+        }
+    }
+
+    [PunRPC]
+    private void RPCA_RequestMegaLaunchImpulse(
+        Vector3 direction,
+        PhotonMessageInfo messageInfo)
+    {
+        if (!IsOwnerRequest(messageInfo))
+        {
+            Plugin.Log.LogWarning("Rejected an unauthorized Mega Launch impulse.");
+            return;
+        }
+
+        CampfireAbilityManager.Instance?.HandleMegaLaunchImpulseRequest(
+            character,
+            direction);
+    }
+
+    [PunRPC]
+    private void RPCA_ApplyMegaLaunchImpulse(
+        Vector3 direction,
+        float force,
+        PhotonMessageInfo messageInfo)
+    {
+        if (AbilityRpcValidation.IsAuthorityMessage(messageInfo))
+        {
+            ApplyMegaLaunchImpulse(direction, force);
+        }
+    }
+
+    private IEnumerator MegaLaunchCountdown(double launchAt)
+    {
+        int lastSecond = -1;
+        while (NetworkTime < launchAt)
+        {
+            int remaining = Mathf.Max(
+                1,
+                Mathf.CeilToInt((float)(launchAt - NetworkTime)));
+            if (remaining != lastSecond)
+            {
+                lastSecond = remaining;
+                CampfireAbilityManager.Instance?.ShowFeedback(
+                    $"MEGA LAUNCH IN {remaining}...",
+                    Plugin.Color);
+            }
+            yield return null;
+        }
+
+        Vector3 direction = character?.data?.lookDirection ?? Vector3.forward;
+        RequestMegaLaunchImpulse(direction);
+    }
+
+    private void ApplyMegaLaunchImpulse(Vector3 direction, float force)
+    {
+        if (character == null || character.data == null || character.data.dead)
+        {
+            return;
+        }
+
+        StartCoroutine(MaintainMegaLaunchProtection());
+        if (!photonView.IsMine)
+        {
+            return;
+        }
+
+        character.refs.movement.CapFallDamage(0f, 15f);
+        character.data.sinceGrounded = 0f;
+        character.AddForce(direction.normalized * force);
+    }
+
+    private IEnumerator MaintainMegaLaunchProtection()
+    {
+        float started = Time.unscaledTime;
+        do
+        {
+            CampfireAbilityManager.Instance?.MarkMegaLaunchImmunity(
+                character,
+                NetworkTime + 0.5d);
+            yield return null;
+        }
+        while (Time.unscaledTime - started < 15f
+            && (Time.unscaledTime - started < 0.5f || !character.data.isGrounded));
+
+        CampfireAbilityManager.Instance?.MarkMegaLaunchImmunity(
+            character,
+            NetworkTime + 2d);
+    }
+
     [PunRPC]
     private void RPCA_RequestSecondWind(PhotonMessageInfo messageInfo)
     {
@@ -265,6 +411,10 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             && photonView.Owner != null
             && messageInfo.Sender.ActorNumber == photonView.Owner.ActorNumber;
     }
+
+    private static double NetworkTime => PhotonNetwork.InRoom
+        ? PhotonNetwork.Time
+        : Time.unscaledTime;
 
 }
 

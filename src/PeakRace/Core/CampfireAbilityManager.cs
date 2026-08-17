@@ -21,6 +21,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const string ChaosKeyPrefix = "RTP.Chaos.";
     private const string ChaosFireKeyPrefix = "RTP.ChaosFire.";
     private const string ExhaustUntilKeyPrefix = "RTP.ExhaustUntil.";
+    private const string GhostRunnerUntilKeyPrefix = "RTP.GhostRunnerUntil.";
+    private const string MegaCooldownUntilKeyPrefix = "RTP.MegaCooldownUntil.";
     private const float FeedbackSeconds = 3.5f;
     private const double ExhaustDurationSeconds = 8d;
     private const double SecondWindImmunitySeconds = 2d;
@@ -29,16 +31,24 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private readonly HashSet<int> chaosActors = new();
     private readonly HashSet<int> chaosAwardedCampfires = new();
     private readonly Dictionary<int, double> exhaustedUntil = new();
+    private readonly Dictionary<int, double> ghostRunnerUntil = new();
+    private readonly Dictionary<int, double> megaCooldownUntil = new();
     private readonly Dictionary<int, double> secondWindImmunityUntil = new();
+    private readonly Dictionary<int, double> megaLaunchImmunityUntil = new();
+    private readonly Dictionary<int, PendingMegaLaunch> pendingMegaLaunches = new();
+    private readonly Dictionary<int, float> catchUpMultipliers = new();
     private readonly Dictionary<CampfireAbility, ConfigEntry<float>> abilityWeights = new();
 
     private ConfigEntry<Key> abilityKeyConfig;
     private ConfigEntry<Key> chaosKeyConfig;
+    private ConfigEntry<float> megaLaunchCooldownConfig;
+    private ConfigEntry<float> megaLaunchForceConfig;
     private string feedbackText;
     private Color feedbackColor = Color.white;
     private float feedbackUntil;
     private bool initialized;
     private bool clearedOutsideRun;
+    private float nextCatchUpRefreshTime;
 
     internal static CampfireAbilityManager Instance { get; private set; }
 
@@ -73,6 +83,20 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             "ChaosKey",
             Key.F5,
             "Key used to activate the separately stored Chaos charge.");
+        megaLaunchCooldownConfig = config.Bind(
+            "PVP Abilities",
+            "MegaLaunchCooldownSeconds",
+            45f,
+            new ConfigDescription(
+                "Cooldown between uses of the reusable Mega Launch ability.",
+                new AcceptableValueRange<float>(5f, 300f)));
+        megaLaunchForceConfig = config.Bind(
+            "PVP Abilities",
+            "MegaLaunchForce",
+            75f,
+            new ConfigDescription(
+                "Physical acceleration impulse applied by Mega Launch.",
+                new AcceptableValueRange<float>(10f, 250f)));
 
         BindWeight(config, CampfireAbility.Adrenaline, 12f);
         BindWeight(config, CampfireAbility.Shield, 12f);
@@ -114,6 +138,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
 
         clearedOutsideRun = false;
+        RefreshCatchUpMultipliers();
         if (!initialized
             || RaceSettingsManager.Current.Mode != RespawnMode.Pvp
             || Character.localCharacter == null
@@ -165,6 +190,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
 
         CampfireAbility awarded = RollAbility();
+        SetMegaCooldownUntil(character, 0d);
         SetAbility(character, awarded);
         NotifyAward(character, CampfireAbilityInfo.GetName(awarded), isChaos: false);
 
@@ -211,9 +237,10 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         {
             NotifyMessage(character, "PASSIVE ABILITY", Plugin.Color);
         }
-        else if (character.data == null
+        else if (ability != CampfireAbility.GhostRunner
+            && (character.data == null
             || character.data.dead
-            || character.data.fullyPassedOut)
+            || character.data.fullyPassedOut))
         {
             NotifyMessage(character, "ABILITY REQUIRES A LIVING SCOUT", Color.gray);
         }
@@ -291,6 +318,18 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                 ActivateChaosHorn(user);
                 break;
 
+            case CampfireAbility.Recall:
+                ActivateRecall(user);
+                break;
+
+            case CampfireAbility.GhostRunner:
+                ActivateGhostRunner(user);
+                break;
+
+            case CampfireAbility.MegaLaunch:
+                ActivateMegaLaunch(user);
+                break;
+
             default:
                 NotifyMessage(
                     user,
@@ -353,6 +392,268 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
         ConsumeMainAbility(user, CampfireAbility.ChaosHorn);
         NotifyMessage(user, $"CHAOS HORN HIT {affected} PLAYER(S)", Plugin.Color);
+    }
+
+    private void ActivateRecall(Character user)
+    {
+        Character leader = GetActivePlayerCharacters()
+            .Where(candidate => candidate.data != null
+                && !candidate.data.dead)
+            .OrderByDescending(candidate => RaceProgress.ForCharacter(candidate).Score)
+            .ThenBy(candidate => GetActorNumber(candidate))
+            .FirstOrDefault();
+        if (leader == null || leader == user)
+        {
+            NotifyMessage(user, "NO VALID TARGET", Color.gray);
+            return;
+        }
+
+        RaceProgress userProgress = RaceProgress.ForCharacter(user);
+        RaceProgress leaderProgress = RaceProgress.ForCharacter(leader);
+        bool largeEnoughGap = leaderProgress.CheckpointIndex
+                >= userProgress.CheckpointIndex + 1
+            || leaderProgress.Score - userProgress.Score >= 0.5f;
+        if (!largeEnoughGap)
+        {
+            NotifyMessage(user, "LEADER GAP TOO SMALL", Color.gray);
+            return;
+        }
+
+        bool blocked = TryBlockDirectedAttack(user, leader);
+        ConsumeMainAbility(user, CampfireAbility.Recall);
+        if (blocked)
+        {
+            return;
+        }
+
+        NotifyMessage(user, $"RECALL TARGET: {leader.characterName}", Plugin.Color);
+        NotifyMessage(leader, "⚠ RECALL INCOMING", new Color(1f, 0.32f, 0.2f, 1f));
+        StartCoroutine(RecallAfterWarning(leader));
+    }
+
+    private System.Collections.IEnumerator RecallAfterWarning(Character target)
+    {
+        yield return new WaitForSeconds(2f);
+        if (!IsAuthority
+            || target == null
+            || target.data == null
+            || target.data.dead
+            || target.photonView == null)
+        {
+            yield break;
+        }
+
+        Vector3 position = RaceRespawnController.GetPreviousCampfirePosition(target);
+        target.photonView.RPC("WarpPlayerRPC", RpcTarget.All, position, true);
+        NotifyMessage(target, "RECALLED", new Color(1f, 0.32f, 0.2f, 1f));
+    }
+
+    private void ActivateGhostRunner(Character user)
+    {
+        if (user == null || !user.IsGhost || user.Ghost == null)
+        {
+            NotifyMessage(user, "GHOST ONLY", Color.gray);
+            return;
+        }
+
+        Character target = user.Ghost.m_target;
+        if (target == null || target.data == null || target.data.dead || target == user)
+        {
+            NotifyMessage(user, "NO VALID SPECTATED TARGET", Color.gray);
+            return;
+        }
+
+        bool blocked = TryBlockDirectedAttack(user, target);
+        ConsumeMainAbility(user, CampfireAbility.GhostRunner);
+        if (blocked)
+        {
+            return;
+        }
+
+        SetGhostRunnerUntil(target, NetworkTime + 15d);
+        NotifyMessage(user, $"GHOST RUNNER HIT {target.characterName}", Plugin.Color);
+        NotifyMessage(target, "GHOST RUNNER  •  15 SECONDS", new Color(0.55f, 0.75f, 1f, 1f));
+    }
+
+    private void ActivateMegaLaunch(Character user)
+    {
+        double remaining = GetMegaLaunchCooldownRemaining(user);
+        if (remaining > 0d)
+        {
+            NotifyMessage(user, $"MEGA LAUNCH COOLDOWN {Math.Ceiling(remaining):0}s", Color.gray);
+            return;
+        }
+
+        int actorNumber = GetActorNumber(user);
+        double launchAt = NetworkTime + 5d;
+        float force = megaLaunchForceConfig.Value;
+        pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(launchAt, force);
+        SetMegaCooldownUntil(user, NetworkTime + megaLaunchCooldownConfig.Value);
+        user.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
+    }
+
+    internal void HandleMegaLaunchImpulseRequest(Character character, Vector3 direction)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (!IsAuthority
+            || GetAbility(character) != CampfireAbility.MegaLaunch
+            || !pendingMegaLaunches.TryGetValue(actorNumber, out PendingMegaLaunch pending)
+            || NetworkTime < pending.LaunchAt - 0.5d
+            || NetworkTime > pending.LaunchAt + 3d
+            || character?.data == null
+            || character.data.dead)
+        {
+            return;
+        }
+
+        pendingMegaLaunches.Remove(actorNumber);
+        Vector3 launchDirection = direction.sqrMagnitude > 0.01f
+            ? direction.normalized
+            : character.data.lookDirection.normalized;
+        character.GetComponent<CampfireAbilityState>()
+            ?.SendMegaLaunchImpulse(launchDirection, pending.Force);
+        NotifyMessage(character, "MEGA LAUNCH", Plugin.Color);
+    }
+
+    internal bool IsGhostRunnerAffected(Character character)
+    {
+        return ghostRunnerUntil.TryGetValue(
+                GetActorNumber(character),
+                out double deadline)
+            && NetworkTime < deadline;
+    }
+
+    internal double GetMegaLaunchCooldownRemaining(Character character)
+    {
+        return megaCooldownUntil.TryGetValue(
+                GetActorNumber(character),
+                out double deadline)
+            ? Math.Max(0d, deadline - NetworkTime)
+            : 0d;
+    }
+
+    internal bool HasMegaLaunchImmunity(Character character)
+    {
+        return megaLaunchImmunityUntil.TryGetValue(
+                GetActorNumber(character),
+                out double deadline)
+            && NetworkTime < deadline;
+    }
+
+    internal void MarkMegaLaunchImmunity(Character character, double deadline)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (actorNumber > 0 && deadline > NetworkTime)
+        {
+            megaLaunchImmunityUntil[actorNumber] = deadline;
+        }
+    }
+
+    internal float GetCatchUpMultiplier(Character character)
+    {
+        RefreshCatchUpMultipliers();
+        return catchUpMultipliers.TryGetValue(
+            GetActorNumber(character),
+            out float multiplier)
+            ? multiplier
+            : 1f;
+    }
+
+    internal bool HasSystemCatchUp(Character character)
+    {
+        return GetCatchUpMultiplier(character) > 1f
+            && GetAbility(character) != CampfireAbility.CatchUp;
+    }
+
+    private void RefreshCatchUpMultipliers()
+    {
+        if (Time.unscaledTime < nextCatchUpRefreshTime)
+        {
+            return;
+        }
+
+        nextCatchUpRefreshTime = Time.unscaledTime + 0.25f;
+        catchUpMultipliers.Clear();
+        if (RaceSettingsManager.Current.Mode != RespawnMode.Pvp)
+        {
+            return;
+        }
+
+        List<Character> racers = GetActivePlayerCharacters()
+            .Where(character => character.data != null && !character.data.dead)
+            .ToList();
+        if (racers.Count < 2)
+        {
+            return;
+        }
+
+        Dictionary<Character, RaceProgress> progress = racers.ToDictionary(
+            character => character,
+            RaceProgress.ForCharacter);
+        Character leader = racers
+            .OrderByDescending(character => progress[character].Score)
+            .ThenBy(character => GetActorNumber(character))
+            .First();
+        Character last = racers
+            .OrderBy(character => progress[character].Score)
+            .ThenByDescending(character => GetActorNumber(character))
+            .First();
+        RaceProgress leaderProgress = progress[leader];
+
+        foreach (Character racer in racers)
+        {
+            if (racer != last && GetAbility(racer) != CampfireAbility.CatchUp)
+            {
+                continue;
+            }
+
+            RaceProgress racerProgress = progress[racer];
+            int checkpointGap = leaderProgress.CheckpointIndex - racerProgress.CheckpointIndex;
+            float scoreGap = leaderProgress.Score - racerProgress.Score;
+            float multiplier = checkpointGap >= 2
+                ? 1.25f
+                : checkpointGap >= 1
+                    ? 1.15f
+                    : scoreGap >= 0.66f
+                        ? 1.10f
+                        : scoreGap >= 0.10f
+                            ? 1.05f
+                            : 1f;
+            if (multiplier > 1f)
+            {
+                catchUpMultipliers[GetActorNumber(racer)] = multiplier;
+            }
+        }
+    }
+
+    private void SetGhostRunnerUntil(Character character, double deadline)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (actorNumber > 0
+            && SetRoomProperty(GhostRunnerUntilKey(actorNumber), deadline))
+        {
+            ghostRunnerUntil[actorNumber] = deadline;
+        }
+    }
+
+    private void SetMegaCooldownUntil(Character character, double deadline)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (actorNumber == 0
+            || !SetRoomProperty(MegaCooldownUntilKey(actorNumber), deadline))
+        {
+            return;
+        }
+
+        if (deadline > NetworkTime)
+        {
+            megaCooldownUntil[actorNumber] = deadline;
+        }
+        else
+        {
+            megaCooldownUntil.Remove(actorNumber);
+            pendingMegaLaunches.Remove(actorNumber);
+        }
     }
 
     internal bool TryBlockDirectedAttack(Character attacker, Character target)
@@ -647,6 +948,50 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     Plugin.Log.LogWarning($"Ignored malformed Exhaust deadline '{key}'.");
                 }
             }
+            else if (TryParseSuffix(key, GhostRunnerUntilKeyPrefix, out int ghostActor))
+            {
+                ApplyDeadlineProperty(
+                    key,
+                    boxed,
+                    ghostActor,
+                    ghostRunnerUntil,
+                    "Ghost Runner");
+            }
+            else if (TryParseSuffix(key, MegaCooldownUntilKeyPrefix, out int megaActor))
+            {
+                ApplyDeadlineProperty(
+                    key,
+                    boxed,
+                    megaActor,
+                    megaCooldownUntil,
+                    "Mega Launch cooldown");
+            }
+        }
+    }
+
+    private static void ApplyDeadlineProperty(
+        string key,
+        object boxed,
+        int actorNumber,
+        Dictionary<int, double> destination,
+        string label)
+    {
+        try
+        {
+            double deadline = boxed != null ? Convert.ToDouble(boxed) : 0d;
+            if (deadline > NetworkTime)
+            {
+                destination[actorNumber] = deadline;
+            }
+            else
+            {
+                destination.Remove(actorNumber);
+            }
+        }
+        catch (Exception)
+        {
+            destination.Remove(actorNumber);
+            Plugin.Log.LogWarning($"Ignored malformed {label} deadline '{key}'.");
         }
     }
 
@@ -664,7 +1009,13 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         chaosActors.Clear();
         chaosAwardedCampfires.Clear();
         exhaustedUntil.Clear();
+        ghostRunnerUntil.Clear();
+        megaCooldownUntil.Clear();
         secondWindImmunityUntil.Clear();
+        megaLaunchImmunityUntil.Clear();
+        pendingMegaLaunches.Clear();
+        catchUpMultipliers.Clear();
+        nextCatchUpRefreshTime = 0f;
         feedbackText = null;
 
         if (!clearRoomProperties
@@ -682,7 +1033,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                 && (key.StartsWith(AbilityKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(ChaosKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(ChaosFireKeyPrefix, StringComparison.Ordinal)
-                    || key.StartsWith(ExhaustUntilKeyPrefix, StringComparison.Ordinal)))
+                    || key.StartsWith(ExhaustUntilKeyPrefix, StringComparison.Ordinal)
+                    || key.StartsWith(GhostRunnerUntilKeyPrefix, StringComparison.Ordinal)
+                    || key.StartsWith(MegaCooldownUntilKeyPrefix, StringComparison.Ordinal)))
             {
                 removals[key] = null;
             }
@@ -728,6 +1081,12 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private static string ExhaustUntilKey(int actorNumber) =>
         ExhaustUntilKeyPrefix + actorNumber;
 
+    private static string GhostRunnerUntilKey(int actorNumber) =>
+        GhostRunnerUntilKeyPrefix + actorNumber;
+
+    private static string MegaCooldownUntilKey(int actorNumber) =>
+        MegaCooldownUntilKeyPrefix + actorNumber;
+
     private static double NetworkTime => PhotonNetwork.InRoom
         ? PhotonNetwork.Time
         : Time.unscaledTime;
@@ -769,5 +1128,18 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         {
             Instance = null;
         }
+    }
+
+    private readonly struct PendingMegaLaunch
+    {
+        internal PendingMegaLaunch(double launchAt, float force)
+        {
+            LaunchAt = launchAt;
+            Force = force;
+        }
+
+        internal double LaunchAt { get; }
+
+        internal float Force { get; }
     }
 }

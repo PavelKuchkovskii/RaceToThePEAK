@@ -50,8 +50,16 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
             CampfireAbilityInfo.GetName(ability),
             abilityStyle);
 
+        double megaCooldown = ability == CampfireAbility.MegaLaunch
+            ? manager.GetMegaLaunchCooldownRemaining(localCharacter)
+            : 0d;
+        float catchUpMultiplier = manager.GetCatchUpMultiplier(localCharacter);
         string abilityHint = ability == CampfireAbility.None
             ? "Activate a campfire to receive one"
+            : ability == CampfireAbility.MegaLaunch && megaCooldown > 0d
+                ? $"COOLDOWN  {Mathf.CeilToInt((float)megaCooldown)}s"
+            : ability == CampfireAbility.CatchUp && catchUpMultiplier > 1f
+                ? $"PASSIVE  •  +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%"
             : CampfireAbilityInfo.IsPassive(ability)
                 ? "PASSIVE"
                 : $"{manager.AbilityKeyDisplayName}: ACTIVATE";
@@ -63,6 +71,15 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
             new Rect(x + 12f, y + 82f, width - 24f, 22f),
             hasChaos ? $"CHAOS  •  {manager.ChaosKeyDisplayName}: ACTIVATE" : "CHAOS  •  EMPTY",
             hintStyle);
+
+        if (manager.HasSystemCatchUp(localCharacter))
+        {
+            GUI.color = new Color(0.4f, 0.9f, 1f, 1f);
+            GUI.Label(
+                new Rect(x + 132f, y + 5f, width - 144f, 20f),
+                $"LAST +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
+                hintStyle);
+        }
 
         if (manager.TryGetFeedback(out string feedback, out Color feedbackColor))
         {
