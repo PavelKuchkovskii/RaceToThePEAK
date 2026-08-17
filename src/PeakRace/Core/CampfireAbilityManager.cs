@@ -951,6 +951,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private void ActivateChaosHorn(Character user)
     {
         int affected = 0;
+        int blocked = 0;
         foreach (Character target in GetActivePlayerCharacters())
         {
             if (target == user
@@ -961,13 +962,22 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                 continue;
             }
 
+            if (TryBlockDirectedAttack(user, target))
+            {
+                blocked++;
+                continue;
+            }
+
             target.GetComponent<CampfireAbilityState>()?.SendRemoveExtraStamina();
             NotifyMessage(target, "CHAOS HORN  •  BONUS STAMINA LOST", new Color(1f, 0.4f, 0.2f, 1f));
             affected++;
         }
 
         ConsumeMainAbility(user, CampfireAbility.ChaosHorn);
-        NotifyMessage(user, $"CHAOS HORN HIT {affected} PLAYER(S)", Plugin.Color);
+        string result = blocked > 0
+            ? $"CHAOS HORN HIT {affected}  •  BLOCKED {blocked}"
+            : $"CHAOS HORN HIT {affected} PLAYER(S)";
+        NotifyMessage(user, result, Plugin.Color);
     }
 
     private void ActivateChaos(Character user)

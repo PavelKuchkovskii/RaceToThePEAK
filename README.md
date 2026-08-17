@@ -83,7 +83,7 @@ Weights are relative rather than percentages. Setting a weight to `0` disables t
 | Ability | Type | Default weight | Effect |
 | --- | --- | ---: | --- |
 | **Adrenaline** | Active, one use | 12 | Applies the original Lollipop and Energy Drink effects together. |
-| **Shield** | Passive, one block | 12 | Blocks and consumes itself against the next directed Exhaust, Recall or Ghost Runner. |
+| **Shield** | Passive, one block | 12 | Blocks and consumes itself against the next Exhaust, Recall, Ghost Runner or Chaos Horn effect. |
 | **Exhaust** | Active, one use | 12 | Targets a random racer ahead and increases their stamina use by 40% for 8 seconds. It is not consumed when no valid target exists. |
 | **Second Wind** | Passive, one recovery | 12 | Automatically recovers the owner from the next ordinary unconscious state, clears accumulated cold, heat, poison, spores and drowsiness without removing persistent conditions, and grants 2 seconds of protection. |
 | **Catch Up** | Passive while held | 12 | Improves movement, jumping, climbing and stamina recovery by 5-25% according to the gap to the leader. The last-place racer also qualifies for this gap-based aid without holding the ability. |
