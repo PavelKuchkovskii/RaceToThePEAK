@@ -17,6 +17,8 @@ namespace PeakRace.Patch;
 [HarmonyPatch]
 internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 {
+    private const float MegaLaunchVelocityScale = 0.2f;
+
     private static readonly CharacterAfflictions.STATUSTYPE[]
         SecondWindTemporaryStatuses =
         {
@@ -267,7 +269,9 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             yield return null;
         }
 
-        Vector3 direction = character?.data?.lookDirection ?? Vector3.forward;
+        Vector3 direction = MainCamera.instance != null
+            ? MainCamera.instance.transform.forward
+            : character?.data?.lookDirection ?? Vector3.forward;
         RequestMegaLaunchImpulse(direction);
     }
 
@@ -286,13 +290,23 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 
         character.refs.movement.CapFallDamage(0f, 15f);
         character.data.sinceGrounded = 0f;
-        Vector3 launchForce = direction.normalized * force;
+        Vector3 launchVelocity = direction.normalized
+            * force
+            * MegaLaunchVelocityScale;
 
-        // Character also exposes AddForce(object), but that compatibility stub
-        // throws NotImplementedException. Supplying the multiplier range binds
-        // to PEAK's real ragdoll-force API and applies one deterministic impulse
-        // to every body part owned by this client.
-        character.AddForce(launchForce, 1f, 1f);
+        // Character.AddForce uses ForceMode.Acceleration. Applied for only one
+        // physics step, the configured default of 75 changes velocity by about
+        // 1.5 m/s and is immediately lost to grounded movement. A synchronized
+        // velocity change is frame-rate independent and moves every owned
+        // ragdoll part by the same amount without tearing the character apart.
+        foreach (Bodypart bodypart in character.refs.ragdoll.partList)
+        {
+            bodypart?.AddForce(launchVelocity, ForceMode.VelocityChange);
+        }
+
+        Plugin.Log.LogInfo(
+            $"Applied Mega Launch to {character.characterName}: "
+            + $"velocity {launchVelocity.magnitude:0.##} m/s.");
     }
 
     private IEnumerator MaintainMegaLaunchProtection()

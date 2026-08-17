@@ -14,6 +14,7 @@
 * Added one synchronized random starting ability for every racer in PVP, using the same configured weights as campfire rewards. Starting grants persist across host migration and do not include Chaos.
 * Replaced reused vanilla biome seals with precise local checkpoint gates after each campfire, so lagging racers can always reach and claim an already-lit fire while unearned biomes remain inaccessible. The master client also corrects boundary bypasses and physics desynchronization.
 * Fixed first-biome race scores so directed abilities such as Exhaust can identify racers ahead while the user is still on the beach.
+* Made Mega Launch use the owner's camera direction and a deterministic ragdoll velocity change, preventing its one-frame acceleration from being absorbed by grounded movement.
 
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.
