@@ -177,6 +177,7 @@ internal sealed class CampfireProgressionController : MonoBehaviourPunCallbacks
 
         ResumeTimersForCompletedScope(character, completionScope);
         RaceRespawnController.Instance?.HandleCampfireCompleted(character, campfire, campfireIndex);
+        CampfireAbilityManager.Instance?.HandleCampfireCompleted(character, campfireIndex);
 
         if (campfire.state == Campfire.FireState.Off)
         {

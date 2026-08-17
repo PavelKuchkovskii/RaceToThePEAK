@@ -50,6 +50,8 @@ public partial class Plugin : BaseUnityPlugin
         DontDestroyOnLoad(systemsObject);
         RaceSettingsManager settingsManager = systemsObject.AddComponent<RaceSettingsManager>();
         settingsManager.Initialize(Config);
+        CampfireAbilityManager abilityManager = systemsObject.AddComponent<CampfireAbilityManager>();
+        abilityManager.Initialize(Config);
         systemsObject.AddComponent<CampfireProgressionController>();
         systemsObject.AddComponent<PlayerCampfireProgressTracker>();
         systemsObject.AddComponent<RaceRespawnController>();
@@ -59,6 +61,7 @@ public partial class Plugin : BaseUnityPlugin
         systemsObject.AddComponent<LocalBiomeEnvironmentController>();
         systemsObject.AddComponent<FinalHazardController>();
         systemsObject.AddComponent<RespawnCountdownUI>();
+        systemsObject.AddComponent<CampfireAbilityHUD>();
 
         settingsMenuObject = new GameObject("RaceToThePeakSettingsUI");
         DontDestroyOnLoad(settingsMenuObject);
@@ -99,6 +102,9 @@ public partial class Plugin : BaseUnityPlugin
         //Character Team Handler
         harmony.PatchAll(typeof(CharacterTeamInfo));
         Log.LogInfo("Character Team Handler Successful");
+
+        harmony.PatchAll(typeof(CampfireAbilityState));
+        Log.LogInfo("Campfire Ability State Successful");
 
         harmony.PatchAll(typeof(RespawnPatch));
         Log.LogInfo("Respawn Strategies Successful");
