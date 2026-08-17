@@ -23,6 +23,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const string ExhaustUntilKeyPrefix = "RTP.ExhaustUntil.";
     private const string GhostRunnerUntilKeyPrefix = "RTP.GhostRunnerUntil.";
     private const string MegaCooldownUntilKeyPrefix = "RTP.MegaCooldownUntil.";
+    private const string MegaLaunchFoodKeyPrefix = "RTP.MegaFood.";
     private const float FeedbackSeconds = 3.5f;
     private const double ExhaustDurationSeconds = 8d;
     private const double SecondWindImmunitySeconds = 2d;
@@ -36,6 +37,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private readonly Dictionary<int, double> secondWindImmunityUntil = new();
     private readonly Dictionary<int, double> megaLaunchImmunityUntil = new();
     private readonly Dictionary<int, PendingMegaLaunch> pendingMegaLaunches = new();
+    private readonly HashSet<int> megaLaunchFoodViewIds = new();
     private readonly Dictionary<int, float> catchUpMultipliers = new();
     private readonly Dictionary<int, Vector3> lastSafePositions = new();
     private readonly Dictionary<CampfireAbility, ConfigEntry<float>> abilityWeights = new();
@@ -45,6 +47,11 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private ConfigEntry<Key> chaosKeyConfig;
     private ConfigEntry<float> megaLaunchCooldownConfig;
     private ConfigEntry<float> megaLaunchForceConfig;
+    private ConfigEntry<float> megaFoodLeaderChanceConfig;
+    private ConfigEntry<float> megaFoodMiddleChanceConfig;
+    private ConfigEntry<float> megaFoodNearLastChanceConfig;
+    private ConfigEntry<float> megaFoodLastChanceConfig;
+    private ConfigEntry<float> megaFoodFarBehindChanceConfig;
     private string feedbackText;
     private Color feedbackColor = Color.white;
     private float feedbackUntil;
@@ -100,6 +107,31 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             new ConfigDescription(
                 "Physical acceleration impulse applied by Mega Launch.",
                 new AcceptableValueRange<float>(10f, 250f)));
+        megaFoodLeaderChanceConfig = BindMegaFoodChance(
+            config,
+            "LeaderChancePercent",
+            1.5f,
+            "Hidden Mega Launch food chance for the current leader.");
+        megaFoodMiddleChanceConfig = BindMegaFoodChance(
+            config,
+            "MiddleChancePercent",
+            4f,
+            "Hidden Mega Launch food chance for a middle-position racer.");
+        megaFoodNearLastChanceConfig = BindMegaFoodChance(
+            config,
+            "NearLastChancePercent",
+            7f,
+            "Hidden Mega Launch food chance for a racer in the final quarter of the field.");
+        megaFoodLastChanceConfig = BindMegaFoodChance(
+            config,
+            "LastChancePercent",
+            12.5f,
+            "Hidden Mega Launch food chance for the last-place racer.");
+        megaFoodFarBehindChanceConfig = BindMegaFoodChance(
+            config,
+            "FarBehindChancePercent",
+            18f,
+            "Hidden Mega Launch food chance when the opener trails the leader by at least 1.5 segments.");
 
         BindWeight(config, CampfireAbility.Adrenaline, 12f);
         BindWeight(config, CampfireAbility.Shield, 12f);
@@ -118,6 +150,21 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         BindChaosWeight(config, ChaosEffect.PreviousCampfire, 10f);
         BindChaosWeight(config, ChaosEffect.MiddleCampfire, 4f);
         initialized = true;
+    }
+
+    private static ConfigEntry<float> BindMegaFoodChance(
+        ConfigFile config,
+        string key,
+        float defaultValue,
+        string description)
+    {
+        return config.Bind(
+            "PVP Hidden Mega Launch Food",
+            key,
+            defaultValue,
+            new ConfigDescription(
+                description,
+                new AcceptableValueRange<float>(0f, 100f)));
     }
 
     private void BindWeight(
@@ -762,17 +809,166 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         int actorNumber = GetActorNumber(user);
         double launchAt = NetworkTime + 5d;
         float force = megaLaunchForceConfig.Value;
-        pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(launchAt, force);
+        pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(
+            launchAt,
+            force,
+            requiresAbility: true);
         SetMegaCooldownUntil(user, NetworkTime + megaLaunchCooldownConfig.Value);
         user.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
+    }
+
+    internal void RecordHiddenMegaLaunchFood(
+        Luggage luggage,
+        IEnumerable<PhotonView> spawnedViews)
+    {
+        if (!IsAuthority
+            || RaceSettingsManager.Current.Mode != RespawnMode.Pvp
+            || luggage == null
+            || luggage is RespawnChest
+            || spawnedViews == null)
+        {
+            return;
+        }
+
+        Vector3 chestCenter = luggage.Center();
+        Character opener = GetLivingCharacters()
+            .OrderBy(character => (character.Center - chestCenter).sqrMagnitude)
+            .FirstOrDefault();
+        if (opener == null)
+        {
+            return;
+        }
+
+        float chancePercent = GetHiddenMegaLaunchFoodChance(opener);
+        foreach (PhotonView view in spawnedViews)
+        {
+            Item item = view != null ? view.GetComponent<Item>() : null;
+            if (!IsOrdinaryFood(item)
+                || UnityEngine.Random.Range(0f, 100f) >= chancePercent)
+            {
+                continue;
+            }
+
+            if (SetRoomProperty(MegaLaunchFoodKey(view.ViewID), true))
+            {
+                megaLaunchFoodViewIds.Add(view.ViewID);
+                Plugin.Log.LogInfo(
+                    $"Marked hidden Mega Launch food {view.ViewID} for "
+                    + $"{opener.characterName} at {chancePercent:0.#}% odds.");
+            }
+        }
+    }
+
+    internal void HandleHiddenMegaLaunchFoodConsumed(Item item, int consumerViewId)
+    {
+        PhotonView itemView = item != null ? item.GetComponent<PhotonView>() : null;
+        if (!IsAuthority
+            || itemView == null
+            || !megaLaunchFoodViewIds.Remove(itemView.ViewID))
+        {
+            return;
+        }
+
+        SetRoomProperty(MegaLaunchFoodKey(itemView.ViewID), null);
+        PhotonView consumerView = PhotonNetwork.GetPhotonView(consumerViewId);
+        Character consumer = consumerView != null
+            ? consumerView.GetComponent<Character>()
+            : null;
+        if (!IsActivePlayerCharacter(consumer)
+            || consumer.data == null
+            || consumer.data.dead)
+        {
+            Plugin.Log.LogWarning(
+                $"Hidden Mega Launch food {itemView.ViewID} had no valid consumer.");
+            return;
+        }
+
+        StartMegaLaunchCountdown(consumer, requiresAbility: false);
+    }
+
+    internal void ForgetHiddenMegaLaunchFood(Item item)
+    {
+        PhotonView itemView = item != null ? item.GetComponent<PhotonView>() : null;
+        if (IsAuthority
+            && itemView != null
+            && megaLaunchFoodViewIds.Remove(itemView.ViewID))
+        {
+            SetRoomProperty(MegaLaunchFoodKey(itemView.ViewID), null);
+        }
+    }
+
+    private void StartMegaLaunchCountdown(Character character, bool requiresAbility)
+    {
+        int actorNumber = GetActorNumber(character);
+        if (actorNumber == 0)
+        {
+            return;
+        }
+
+        double launchAt = NetworkTime + 5d;
+        pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(
+            launchAt,
+            megaLaunchForceConfig.Value,
+            requiresAbility);
+        character.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
+    }
+
+    private float GetHiddenMegaLaunchFoodChance(Character opener)
+    {
+        List<Character> racers = GetLivingCharacters()
+            .OrderByDescending(character => RaceProgress.ForCharacter(character).Score)
+            .ThenBy(character => GetActorNumber(character))
+            .ToList();
+        int position = racers.IndexOf(opener);
+        if (position <= 0 || racers.Count <= 1)
+        {
+            return megaFoodLeaderChanceConfig.Value;
+        }
+
+        float leaderScore = RaceProgress.ForCharacter(racers[0]).Score;
+        float openerScore = RaceProgress.ForCharacter(opener).Score;
+        if (leaderScore - openerScore >= 1.5f)
+        {
+            return megaFoodFarBehindChanceConfig.Value;
+        }
+
+        if (position == racers.Count - 1)
+        {
+            return megaFoodLastChanceConfig.Value;
+        }
+
+        float fieldPosition = position / (float)(racers.Count - 1);
+        return fieldPosition >= 0.75f
+            ? megaFoodNearLastChanceConfig.Value
+            : megaFoodMiddleChanceConfig.Value;
+    }
+
+    private static bool IsOrdinaryFood(Item item)
+    {
+        if (item == null
+            || item.GetComponent<Action_Consume>() == null
+            || item.itemTags.HasFlag(Item.ItemTags.Mystical)
+            || (item.itemTags & (Item.ItemTags.PackagedFood
+                | Item.ItemTags.Berry
+                | Item.ItemTags.Mushroom)) == Item.ItemTags.None)
+        {
+            return false;
+        }
+
+        // Keep rare emergency healing items deterministic. Hunger restoration
+        // and harmful side effects still qualify as ordinary food behavior.
+        return !item.GetComponents<Action_ModifyStatus>().Any(effect =>
+            effect.changeAmount < 0f
+            && effect.statusType != CharacterAfflictions.STATUSTYPE.Hunger);
     }
 
     internal void HandleMegaLaunchImpulseRequest(Character character, Vector3 direction)
     {
         int actorNumber = GetActorNumber(character);
         if (!IsAuthority
-            || GetAbility(character) != CampfireAbility.MegaLaunch
             || !pendingMegaLaunches.TryGetValue(actorNumber, out PendingMegaLaunch pending)
+            || (pending.RequiresAbility
+                && GetAbility(character) != CampfireAbility.MegaLaunch)
             || NetworkTime < pending.LaunchAt - 0.5d
             || NetworkTime > pending.LaunchAt + 3d
             || character?.data == null
@@ -1241,6 +1437,28 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     megaCooldownUntil,
                     "Mega Launch cooldown");
             }
+            else if (TryParseSuffix(key, MegaLaunchFoodKeyPrefix, out int foodViewId))
+            {
+                bool enabled = false;
+                try
+                {
+                    enabled = boxed != null && Convert.ToBoolean(boxed);
+                }
+                catch (Exception)
+                {
+                    Plugin.Log.LogWarning(
+                        $"Ignored malformed hidden Mega Launch food '{key}'.");
+                }
+
+                if (enabled)
+                {
+                    megaLaunchFoodViewIds.Add(foodViewId);
+                }
+                else
+                {
+                    megaLaunchFoodViewIds.Remove(foodViewId);
+                }
+            }
         }
     }
 
@@ -1289,6 +1507,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         secondWindImmunityUntil.Clear();
         megaLaunchImmunityUntil.Clear();
         pendingMegaLaunches.Clear();
+        megaLaunchFoodViewIds.Clear();
         catchUpMultipliers.Clear();
         lastSafePositions.Clear();
         nextCatchUpRefreshTime = 0f;
@@ -1312,7 +1531,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     || key.StartsWith(ChaosFireKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(ExhaustUntilKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(GhostRunnerUntilKeyPrefix, StringComparison.Ordinal)
-                    || key.StartsWith(MegaCooldownUntilKeyPrefix, StringComparison.Ordinal)))
+                    || key.StartsWith(MegaCooldownUntilKeyPrefix, StringComparison.Ordinal)
+                    || key.StartsWith(MegaLaunchFoodKeyPrefix, StringComparison.Ordinal)))
             {
                 removals[key] = null;
             }
@@ -1364,6 +1584,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private static string MegaCooldownUntilKey(int actorNumber) =>
         MegaCooldownUntilKeyPrefix + actorNumber;
 
+    private static string MegaLaunchFoodKey(int viewId) =>
+        MegaLaunchFoodKeyPrefix + viewId;
+
     private static double NetworkTime => PhotonNetwork.InRoom
         ? PhotonNetwork.Time
         : Time.unscaledTime;
@@ -1409,14 +1632,20 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
     private readonly struct PendingMegaLaunch
     {
-        internal PendingMegaLaunch(double launchAt, float force)
+        internal PendingMegaLaunch(
+            double launchAt,
+            float force,
+            bool requiresAbility)
         {
             LaunchAt = launchAt;
             Force = force;
+            RequiresAbility = requiresAbility;
         }
 
         internal double LaunchAt { get; }
 
         internal float Force { get; }
+
+        internal bool RequiresAbility { get; }
     }
 }
