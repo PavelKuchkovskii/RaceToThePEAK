@@ -1,3 +1,4 @@
+using PeakRace.Core;
 using Photon.Pun;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -11,7 +12,8 @@ namespace PeakRace.UI;
 internal sealed class RunControlMenu : MenuWindow
 {
     private const int PanelWidth = 440;
-    private const int PanelHeight = 230;
+    private const int NormalPanelHeight = 230;
+    private const int TestPanelHeight = 380;
     private const int Padding = 16;
 
     private Texture2D whiteTexture;
@@ -19,6 +21,8 @@ internal sealed class RunControlMenu : MenuWindow
     private GUIStyle bodyStyle;
     private bool awaitingConfirmation;
     private bool endRequested;
+    private string statusMessage;
+    private float statusMessageUntil;
 
     internal bool IsVisible { get; private set; }
 
@@ -52,6 +56,8 @@ internal sealed class RunControlMenu : MenuWindow
         {
             endRequested = false;
         }
+        statusMessage = null;
+        statusMessageUntil = 0f;
     }
 
     internal void ToggleMenu()
@@ -75,6 +81,8 @@ internal sealed class RunControlMenu : MenuWindow
     internal void CloseMenu()
     {
         awaitingConfirmation = false;
+        statusMessage = null;
+        statusMessageUntil = 0f;
         IsVisible = false;
 
         // Do not use the view flag as the source of truth here. The base
@@ -119,8 +127,12 @@ internal sealed class RunControlMenu : MenuWindow
         }
 
         EnsureStyles();
+        bool showTestControls = CanUsePvpTestControls;
+        float panelHeight = showTestControls
+            ? TestPanelHeight
+            : NormalPanelHeight;
         float x = Mathf.Max(20f, Screen.width - PanelWidth - 20f);
-        Rect panel = new(x, 20f, PanelWidth, PanelHeight);
+        Rect panel = new(x, 20f, PanelWidth, panelHeight);
 
         GUI.color = new Color(0f, 0f, 0f, 0.84f);
         GUI.DrawTexture(panel, whiteTexture);
@@ -133,12 +145,68 @@ internal sealed class RunControlMenu : MenuWindow
 
         GUI.Label(
             new Rect(panel.x + Padding, panel.y + 56f, panel.width - Padding * 2, 58f),
-            "Host only. Ends the current run through PEAK's normal results screen. "
-            + "Afterwards the room can return to the Airport without recreating the lobby.",
+            showTestControls
+                ? "PVP test mode is enabled. Ability rerolls and Chaos grants are separate, so they can be tested independently."
+                : "Host only. Ends the current run through PEAK's normal results screen. "
+                    + "Afterwards the room can return to the Airport without recreating the lobby.",
             bodyStyle);
 
         if (!awaitingConfirmation)
         {
+            if (showTestControls)
+            {
+                Color testBackground = GUI.backgroundColor;
+                GUI.backgroundColor = new Color(0.28f, 0.55f, 0.82f, 1f);
+                if (GUI.Button(
+                    new Rect(
+                        panel.x + Padding,
+                        panel.y + 124f,
+                        panel.width - Padding * 2,
+                        44f),
+                    "REROLL ALL ABILITIES"))
+                {
+                    int rerolled = CampfireAbilityManager.Instance
+                        ?.RerollAbilitiesForTesting() ?? 0;
+                    statusMessage = rerolled > 0
+                        ? $"Rerolled {rerolled} player(s)."
+                        : "No active players were rerolled.";
+                    statusMessageUntil = Time.unscaledTime + 3f;
+                }
+                GUI.backgroundColor = testBackground;
+
+                Color chaosBackground = GUI.backgroundColor;
+                GUI.backgroundColor = new Color(0.82f, 0.23f, 0.18f, 1f);
+                if (GUI.Button(
+                    new Rect(
+                        panel.x + Padding,
+                        panel.y + 176f,
+                        panel.width - Padding * 2,
+                        44f),
+                    "GIVE CHAOS TO ALL"))
+                {
+                    int granted = CampfireAbilityManager.Instance
+                        ?.GrantChaosForTesting() ?? 0;
+                    statusMessage = granted > 0
+                        ? $"Granted Chaos to {granted} player(s)."
+                        : "No active players received Chaos.";
+                    statusMessageUntil = Time.unscaledTime + 3f;
+                }
+                GUI.backgroundColor = chaosBackground;
+
+                if (!string.IsNullOrEmpty(statusMessage)
+                    && Time.unscaledTime < statusMessageUntil)
+                {
+                    GUI.Label(
+                        new Rect(
+                            panel.x + Padding,
+                            panel.y + 228f,
+                            panel.width - Padding * 2,
+                            28f),
+                        statusMessage,
+                        bodyStyle);
+                }
+            }
+
             Color previousBackground = GUI.backgroundColor;
             GUI.backgroundColor = new Color(0.85f, 0.16f, 0.16f, 1f);
             if (GUI.Button(
@@ -174,6 +242,12 @@ internal sealed class RunControlMenu : MenuWindow
         }
         GUI.backgroundColor = confirmBackground;
     }
+
+    private static bool CanUsePvpTestControls =>
+        CanHostEndCurrentRun
+        && RaceSettingsManager.Current.Mode == RespawnMode.Pvp
+        && RaceSettingsManager.Current.PvpTestModeEnabled
+        && CampfireAbilityManager.Instance != null;
 
     private void EndCurrentRun()
     {

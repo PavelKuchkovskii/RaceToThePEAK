@@ -318,6 +318,22 @@ internal sealed class RaceSettingsMenu : MenuWindow
             ref y,
             58f);
 
+        if (GUI.Button(
+            new Rect(0f, y, width, RowHeight),
+            $"Test mode: {(settings.PvpTestModeEnabled ? "ON" : "OFF")}"))
+        {
+            manager.TogglePvpTestMode();
+        }
+        y += RowHeight + 6f;
+        if (settings.PvpTestModeEnabled)
+        {
+            DrawWarning(
+                "Adds host-only in-run buttons that reroll every connected player's main Ability or give everyone a Chaos charge.",
+                width,
+                ref y,
+                44f);
+        }
+
         PvpDeathRespawnMode[] options =
         {
             PvpDeathRespawnMode.PreviousCampfire,
@@ -509,7 +525,10 @@ internal sealed class RaceSettingsMenu : MenuWindow
             $"Progression: {(settings.UsesPersonalCampfireClaims ? "personal PVP checkpoints" : WaitModeLabel(settings.WaitMode))}\n"
             + $"Respawn: {ModeLabel(settings.Mode)} ({settings.ActivePenaltyMinutes} min penalty)\n"
             + $"Final hazard: {(settings.UsesPersonalCampfireClaims ? "separate for every player" : HazardScopeLabel(settings.WaitMode))}\n"
-            + $"Old biomes: {RetentionLabel(settings)}";
+            + $"Old biomes: {RetentionLabel(settings)}"
+            + (settings.Mode == RespawnMode.Pvp
+                ? $"\nTest mode: {(settings.PvpTestModeEnabled ? "enabled" : "disabled")}"
+                : string.Empty);
         float summaryHeight = summaryStyle.CalcHeight(new GUIContent(summary), width - 20f) + 16f;
         GUI.Box(new Rect(0f, y, width, summaryHeight), GUIContent.none);
         GUI.Label(new Rect(0f, y, width, summaryHeight), summary, summaryStyle);

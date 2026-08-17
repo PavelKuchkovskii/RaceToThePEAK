@@ -41,7 +41,8 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         corpseRespawnDelaySeconds: 30,
         pvpDeathRespawn: PvpDeathRespawnMode.PreviousCampfire,
         pvpChestRefreshEnabled: false,
-        pvpChestRefreshSeconds: 300);
+        pvpChestRefreshSeconds: 300,
+        pvpTestModeEnabled: false);
 
     internal RaceSettingsSnapshot(
         CampfireWaitMode waitMode,
@@ -53,7 +54,8 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         int corpseRespawnDelaySeconds,
         PvpDeathRespawnMode pvpDeathRespawn,
         bool pvpChestRefreshEnabled,
-        int pvpChestRefreshSeconds)
+        int pvpChestRefreshSeconds,
+        bool pvpTestModeEnabled)
     {
         WaitMode = Enum.IsDefined(typeof(CampfireWaitMode), waitMode)
             ? waitMode
@@ -82,6 +84,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
         }
         PvpChestRefreshEnabled = pvpChestRefreshEnabled;
         PvpChestRefreshSeconds = Mathf.Clamp(pvpChestRefreshSeconds, 30, 1800);
+        PvpTestModeEnabled = pvpTestModeEnabled;
     }
 
     internal CampfireWaitMode WaitMode { get; }
@@ -94,6 +97,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
     internal PvpDeathRespawnMode PvpDeathRespawn { get; }
     internal bool PvpChestRefreshEnabled { get; }
     internal int PvpChestRefreshSeconds { get; }
+    internal bool PvpTestModeEnabled { get; }
 
     internal int ActivePenaltyMinutes => GetPenaltyMinutes(Mode);
 
@@ -155,7 +159,8 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
             && CorpseRespawnDelaySeconds == other.CorpseRespawnDelaySeconds
             && PvpDeathRespawn == other.PvpDeathRespawn
             && PvpChestRefreshEnabled == other.PvpChestRefreshEnabled
-            && PvpChestRefreshSeconds == other.PvpChestRefreshSeconds;
+            && PvpChestRefreshSeconds == other.PvpChestRefreshSeconds
+            && PvpTestModeEnabled == other.PvpTestModeEnabled;
     }
 
     public override bool Equals(object obj)
@@ -177,6 +182,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
             hash = (hash * 397) ^ (int)PvpDeathRespawn;
             hash = (hash * 397) ^ PvpChestRefreshEnabled.GetHashCode();
             hash = (hash * 397) ^ PvpChestRefreshSeconds;
+            hash = (hash * 397) ^ PvpTestModeEnabled.GetHashCode();
             return hash;
         }
     }
@@ -188,7 +194,7 @@ internal readonly struct RaceSettingsSnapshot : IEquatable<RaceSettingsSnapshot>
 /// </summary>
 internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
 {
-    private const int NetworkSchemaVersion = 6;
+    private const int NetworkSchemaVersion = 7;
     private const string VersionKey = "RTP.SettingsVersion";
     private const string WaitModeKey = "RTP.CampfireWaitMode";
     private const string ModeKey = "RTP.RespawnMode";
@@ -200,6 +206,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     private const string PvpDeathRespawnKey = "RTP.PvpDeathRespawnMode";
     private const string PvpChestRefreshEnabledKey = "RTP.PvpChestRefreshEnabled";
     private const string PvpChestRefreshSecondsKey = "RTP.PvpChestRefreshSeconds";
+    private const string PvpTestModeEnabledKey = "RTP.PvpTestModeEnabled";
 
     private ConfigEntry<CampfireWaitMode> waitModeConfig;
     private ConfigEntry<RespawnMode> modeConfig;
@@ -211,6 +218,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
     private ConfigEntry<PvpDeathRespawnMode> pvpDeathRespawnConfig;
     private ConfigEntry<bool> pvpChestRefreshEnabledConfig;
     private ConfigEntry<int> pvpChestRefreshSecondsConfig;
+    private ConfigEntry<bool> pvpTestModeEnabledConfig;
     private bool initialized;
     private bool normalizingLocalConfig;
     private RaceSettingsSnapshot current = RaceSettingsSnapshot.Defaults;
@@ -304,6 +312,12 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
                 "Delay before an opened PVP luggage chest can be opened for new loot.",
                 new AcceptableValueRange<int>(30, 1800)));
 
+        pvpTestModeEnabledConfig = config.Bind(
+            "PVP",
+            "TestMode",
+            false,
+            "Expose host-only in-run controls for repeatedly rerolling every player's Campfire Ability.");
+
         NormalizeLocalConfig(logWarning: true);
 
         waitModeConfig.SettingChanged += OnLocalConfigChanged;
@@ -316,6 +330,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         pvpDeathRespawnConfig.SettingChanged += OnLocalConfigChanged;
         pvpChestRefreshEnabledConfig.SettingChanged += OnLocalConfigChanged;
         pvpChestRefreshSecondsConfig.SettingChanged += OnLocalConfigChanged;
+        pvpTestModeEnabledConfig.SettingChanged += OnLocalConfigChanged;
         initialized = true;
 
         if (PhotonNetwork.InRoom)
@@ -490,6 +505,14 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
         }
     }
 
+    internal void TogglePvpTestMode()
+    {
+        if (CanEditLobbySettings)
+        {
+            pvpTestModeEnabledConfig.Value = !pvpTestModeEnabledConfig.Value;
+        }
+    }
+
     private void OnLocalConfigChanged(object sender, EventArgs eventArgs)
     {
         if (!initialized || normalizingLocalConfig)
@@ -521,7 +544,8 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             corpseDelayConfig.Value,
             pvpDeathRespawnConfig.Value,
             pvpChestRefreshEnabledConfig.Value,
-            pvpChestRefreshSecondsConfig.Value);
+            pvpChestRefreshSecondsConfig.Value,
+            pvpTestModeEnabledConfig.Value);
     }
 
     private void NormalizeLocalConfig(bool logWarning)
@@ -602,7 +626,8 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             [CorpseDelayKey] = snapshot.CorpseRespawnDelaySeconds,
             [PvpDeathRespawnKey] = (int)snapshot.PvpDeathRespawn,
             [PvpChestRefreshEnabledKey] = snapshot.PvpChestRefreshEnabled,
-            [PvpChestRefreshSecondsKey] = snapshot.PvpChestRefreshSeconds
+            [PvpChestRefreshSecondsKey] = snapshot.PvpChestRefreshSeconds,
+            [PvpTestModeEnabledKey] = snapshot.PvpTestModeEnabled
         };
         if (!PhotonNetwork.CurrentRoom.SetCustomProperties(properties))
         {
@@ -613,7 +638,8 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             $"Published lobby race settings: wait {snapshot.WaitMode}, respawn {snapshot.Mode}, "
             + $"penalty {snapshot.ActivePenaltyMinutes}m, corpse delay {snapshot.CorpseRespawnDelaySeconds}s, "
             + $"PVP real death {snapshot.PvpDeathRespawn}, "
-            + $"PVP chest refresh {(snapshot.PvpChestRefreshEnabled ? $"{snapshot.PvpChestRefreshSeconds}s" : "off")}.");
+            + $"PVP chest refresh {(snapshot.PvpChestRefreshEnabled ? $"{snapshot.PvpChestRefreshSeconds}s" : "off")}, "
+            + $"PVP test mode {(snapshot.PvpTestModeEnabled ? "on" : "off")}.");
     }
 
     private bool ApplyRoomSettings()
@@ -642,6 +668,16 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             return false;
         }
 
+        bool pvpTestModeEnabled = false;
+        if (version >= 7
+            && !TryReadBool(
+                properties,
+                PvpTestModeEnabledKey,
+                out pvpTestModeEnabled))
+        {
+            return false;
+        }
+
         RespawnMode parsedMode = Enum.IsDefined(typeof(RespawnMode), mode)
             ? (RespawnMode)mode
             : RespawnMode.PreviousCampfire;
@@ -663,7 +699,8 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             corpseDelay,
             parsedPvpDeathRespawn,
             chestRefreshEnabled,
-            chestRefreshSeconds);
+            chestRefreshSeconds,
+            pvpTestModeEnabled);
         if (version != NetworkSchemaVersion
             || parsedWaitMode != (CampfireWaitMode)waitMode
             || parsedMode != (RespawnMode)mode
@@ -731,7 +768,8 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             $"Using lobby race settings: wait {snapshot.WaitMode}, respawn {snapshot.Mode}, "
             + $"penalty {snapshot.ActivePenaltyMinutes}m, corpse delay {snapshot.CorpseRespawnDelaySeconds}s, "
             + $"PVP real death {snapshot.PvpDeathRespawn}, "
-            + $"PVP chest refresh {(snapshot.PvpChestRefreshEnabled ? $"{snapshot.PvpChestRefreshSeconds}s" : "off")}.");
+            + $"PVP chest refresh {(snapshot.PvpChestRefreshEnabled ? $"{snapshot.PvpChestRefreshSeconds}s" : "off")}, "
+            + $"PVP test mode {(snapshot.PvpTestModeEnabled ? "on" : "off")}.");
     }
 
     public override void OnJoinedRoom()
@@ -764,7 +802,8 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
                 || propertiesThatChanged.ContainsKey(CorpseDelayKey)
                 || propertiesThatChanged.ContainsKey(PvpDeathRespawnKey)
                 || propertiesThatChanged.ContainsKey(PvpChestRefreshEnabledKey)
-                || propertiesThatChanged.ContainsKey(PvpChestRefreshSecondsKey)))
+                || propertiesThatChanged.ContainsKey(PvpChestRefreshSecondsKey)
+                || propertiesThatChanged.ContainsKey(PvpTestModeEnabledKey)))
         {
             ApplyRoomSettings();
         }
@@ -801,6 +840,7 @@ internal sealed class RaceSettingsManager : MonoBehaviourPunCallbacks
             pvpDeathRespawnConfig.SettingChanged -= OnLocalConfigChanged;
             pvpChestRefreshEnabledConfig.SettingChanged -= OnLocalConfigChanged;
             pvpChestRefreshSecondsConfig.SettingChanged -= OnLocalConfigChanged;
+            pvpTestModeEnabledConfig.SettingChanged -= OnLocalConfigChanged;
         }
 
         if (Instance == this)

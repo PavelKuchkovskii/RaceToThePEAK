@@ -116,6 +116,7 @@ The following controls appear in the host's **F3** lobby panel only while **PVP*
 
 - PVP death penalty and real-death destination.
 - Optional opened-luggage refresh and its delay.
+- Optional **Test mode** (off by default), which exposes host-only in-run controls for rerolling every active player's main Ability and giving every active player one Chaos charge.
 - Relative weight for every main ability and every Chaos effect.
 - Mega Launch cooldown and launch force.
 - Hidden Mega Launch Food chances for the leader, middle, near-last, last-place and far-behind tiers.
@@ -126,7 +127,7 @@ These rules synchronize to all clients, remain stable if the host changes and lo
 
 Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Default per-item chances are **1.5%** for the leader, **4%** for the middle, **7%** for near-last, **12.5%** for last place and **18%** when at least 1.5 segments behind the leader. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
 
-During a run, the same configured key (**F3** by default) opens a separate host-only race controls panel in every respawn mode. Its confirmed **End current run** action uses PEAK's normal networked results flow, allowing an unfinished run to end in defeat and the existing room to return to the Airport without recreating the lobby. Guests cannot open or use this panel.
+During a run, the same configured key (**F3** by default) opens a separate host-only race controls panel in every respawn mode. Its confirmed **End current run** action uses PEAK's normal networked results flow, allowing an unfinished run to end in defeat and the existing room to return to the Airport without recreating the lobby. When PVP Test mode is enabled, this panel also has separate **Reroll all abilities** and **Give Chaos to all** actions. Guests cannot open or use this panel.
 
 ## Notes
 Things to be aware of while using this mod:

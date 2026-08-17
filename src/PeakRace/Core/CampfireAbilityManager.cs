@@ -609,6 +609,131 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
     }
 
+    internal int RerollAbilitiesForTesting()
+    {
+        if (!CanUsePvpTestMode())
+        {
+            return 0;
+        }
+
+        List<(Character Character, int ActorNumber, CampfireAbility Ability)>
+            assignments = new();
+        HashSet<int> assignedActors = new();
+        foreach (Character character in GetActivePlayerCharacters())
+        {
+            int actorNumber = GetActorNumber(character);
+            if (actorNumber <= 0 || !assignedActors.Add(actorNumber))
+            {
+                continue;
+            }
+
+            assignments.Add((character, actorNumber, RollAbility()));
+        }
+
+        if (assignments.Count == 0)
+        {
+            return 0;
+        }
+
+        if (PhotonNetwork.InRoom)
+        {
+            Hashtable properties = new();
+            foreach (var assignment in assignments)
+            {
+                properties[AbilityKey(assignment.ActorNumber)] =
+                    (int)assignment.Ability;
+                properties[MegaCooldownUntilKey(assignment.ActorNumber)] = 0d;
+            }
+
+            if (PhotonNetwork.CurrentRoom == null
+                || !PhotonNetwork.CurrentRoom.SetCustomProperties(properties))
+            {
+                Plugin.Log.LogWarning(
+                    "Photon rejected the PVP test ability reroll.");
+                return 0;
+            }
+        }
+
+        foreach (var assignment in assignments)
+        {
+            abilities[assignment.ActorNumber] = assignment.Ability;
+            megaCooldownUntil.Remove(assignment.ActorNumber);
+            pendingMegaLaunches.Remove(assignment.ActorNumber);
+            NotifyAward(
+                assignment.Character,
+                CampfireAbilityInfo.GetName(assignment.Ability),
+                isChaos: false);
+        }
+
+        Plugin.Log.LogInfo(
+            $"PVP test mode rerolled abilities for {assignments.Count} player(s).");
+        return assignments.Count;
+    }
+
+    internal int GrantChaosForTesting()
+    {
+        if (!CanUsePvpTestMode())
+        {
+            return 0;
+        }
+
+        List<(Character Character, int ActorNumber)> recipients = new();
+        HashSet<int> assignedActors = new();
+        foreach (Character character in GetActivePlayerCharacters())
+        {
+            int actorNumber = GetActorNumber(character);
+            if (actorNumber <= 0 || !assignedActors.Add(actorNumber))
+            {
+                continue;
+            }
+
+            recipients.Add((character, actorNumber));
+        }
+
+        if (recipients.Count == 0)
+        {
+            return 0;
+        }
+
+        if (PhotonNetwork.InRoom)
+        {
+            Hashtable properties = new();
+            foreach (var recipient in recipients)
+            {
+                properties[ChaosKey(recipient.ActorNumber)] = true;
+            }
+
+            if (PhotonNetwork.CurrentRoom == null
+                || !PhotonNetwork.CurrentRoom.SetCustomProperties(properties))
+            {
+                Plugin.Log.LogWarning(
+                    "Photon rejected the PVP test Chaos grant.");
+                return 0;
+            }
+        }
+
+        foreach (var recipient in recipients)
+        {
+            chaosActors.Add(recipient.ActorNumber);
+            NotifyAward(recipient.Character, "CHAOS CHARGE", isChaos: true);
+        }
+
+        Plugin.Log.LogInfo(
+            $"PVP test mode granted Chaos to {recipients.Count} player(s).");
+        return recipients.Count;
+    }
+
+    private bool CanUsePvpTestMode()
+    {
+        string scene = SceneManager.GetActiveScene().name;
+        RaceSettingsSnapshot settings = RaceSettingsManager.Current;
+        return initialized
+            && IsAuthority
+            && scene is not "Airport" and not "Title"
+            && settings.Mode == RespawnMode.Pvp
+            && settings.PvpTestModeEnabled;
+    }
+
     private bool SetInitialAbility(int actorNumber, CampfireAbility ability)
     {
         if (PhotonNetwork.InRoom
