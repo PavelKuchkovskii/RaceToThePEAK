@@ -14,7 +14,7 @@ through climbing prowess, or resort to sabotage to be the fastest up the PEAK.
 - Leaderboard. See each troop's time and current altitude.
 - Three host-configurable campfire progression policies outside PVP: wait for nobody, wait for each team independently, or wait for the whole lobby.
 - PVP uses mandatory personal campfire claims: nobody waits for another racer, but nobody may cross a boundary before activating that campfire themselves.
-- Every personal PVP campfire claim rolls a Campfire Ability. One main ability is stored at a time, while the last racer to each fire can also hold one separate Chaos charge.
+- Every racer receives a weighted random Campfire Ability at the start of PVP and after every personal campfire claim. One main ability is stored at a time, while the last racer to each fire can also hold one separate Chaos charge.
 - Old biomes and camp roots remain available while a player, unfinished team, corpse timer or valid respawn target still needs them, then unload as one safe contiguous range.
 - Sun, sky, storms and Gloom visuals follow each client's observed racer, so unlocking a later biome does not obscure earlier racers' routes.
 - Final rising lava or Gloom uses a per-player clock when waiting for nobody, a shared per-team clock when waiting for teams, and PEAK's vanilla global clock when waiting for the lobby.
@@ -30,7 +30,7 @@ The lobby host can press **F3** in the Airport to configure and synchronize the 
 1. **Next campfire**: add a configurable penalty (default **5 minutes**) and revive when the player's team/lobby completes its next campfire. This option is unavailable with **Wait for nobody**, because it could push a player through an unearned biome.
 2. **Timed at corpse**: add a configurable penalty (default **5 minutes**) and revive at the player's own corpse after a configurable delay (default **30 seconds**). A compact team-colored countdown is shown to the dead player and their teammates.
 3. **Previous campfire**: immediately revive at the previous campfire with a configurable penalty (default **0 minutes**).
-4. **PVP**: adds a crimson PVP blowgun with a matching inventory icon to ordinary luggage with a **50% drop chance**. Real deaths can return to the previous campfire or use the corpse timer; next-fire respawning is unavailable because a dead player cannot personally claim that checkpoint. If the special blowgun causes a scout to pass out, their pocket items drop and they are sent immediately to the previous campfire without waiting to become bones. The normal blowgun and all other pass-out causes keep vanilla behavior. Optionally, every opened luggage chest can close and roll new loot after a host-configurable delay (default **5 minutes**).
+4. **PVP**: enables personal campfire progression, the crimson PVP blowgun, separate real-death rules, Campfire Abilities and Chaos. Its complete rules and Airport settings are described in the PVP section below.
 
 Settings are locked after the race leaves the Airport. Only the lobby host can open the RaceToThePeak panel; guests receive the room's active settings silently. Its key is independently configurable as `UI.MenuKey` in RaceToThePeak's BepInEx config and defaults to **F3**, leaving PEAK Unlimited's **F2** menu completely untouched.
 
@@ -46,27 +46,85 @@ The same host panel provides three waiting policies for non-PVP respawn modes:
 
 Disconnected players and bots are excluded. A player who did not select a troop is treated as a one-person team for progression. Already-lit campfires remain logically claimable by later teams, so the first team never grants access to its competitors.
 
-## PVP Campfire Abilities
+## PVP mode
 
-Each personally completed campfire replaces the racer's previous main ability with one weighted random ability. Press **F** by default to use an active main ability; passive abilities work automatically. When PVP is selected, the host lobby panel shows every ability weight, Chaos weight, Mega Launch parameter and hidden-food chance. These rules synchronize to the room and lock when the run starts. The personal F/C key bindings remain configurable in RaceToThePeak's BepInEx config.
+PVP is a complete race mode selected from the **RESPAWN** section of the Airport panel. It does not use the normal Nobody/Team/Lobby waiting selector. Instead, progression, combat rewards and death rules are personal to each racer.
 
-At the beginning of every PVP run, each racer also receives one random main ability from the same weighted pool. This makes abilities available throughout the first biome. The starting grant happens once per racer and never includes a Chaos charge.
+### Personal campfire progression
 
-- **Adrenaline** applies the original Lollipop and Energy Drink effects together.
-- **Shield** passively consumes itself to block the next directed Exhaust, Recall or Ghost Runner.
-- **Exhaust** targets a random racer ahead and raises their stamina consumption by 40% for 8 seconds. It is not consumed when no target exists.
-- **Second Wind** automatically recovers the owner from their next unconscious state and grants 2 seconds of protection.
-- **Catch Up** is a passive race-progress boost. A smaller built-in boost also helps the current last-place racer even without holding the ability.
-- **Recall** warns and returns the leader to their previous campfire only when the lead is sufficiently large.
-- **Chaos Horn** removes bonus stamina from every other living non-ghost racer.
-- **Ghost Runner** lets a ghost penalize the living racer they are spectating for 15 seconds.
-- **Mega Launch** starts a five-second countdown, then applies a physical impulse in the current look direction. It is reusable after a configurable cooldown.
+- Nobody waits for anybody else. A racer can activate a campfire as soon as they reach it.
+- Every racer must personally activate every campfire in sequence. A biome may already be loaded for other players, but its boundary remains blocked until that racer claims the preceding fire.
+- A campfire that is already visually lit remains logically claimable by racers who arrive later.
+- PVP checkpoint state, abilities and Chaos charges are synchronized through the room and survive host migration.
+- Individual timing and final-biome rising hazards follow each racer's own campfire progress.
 
-The in-run HUD uses a floating, PEAK-like icon stack at the left-center of the screen, away from the teammate respawn timer, stamina, status and inventory HUD. Ready active abilities have a bright underline, passive abilities use blue, and a cooling-down Mega Launch is dimmed with remaining seconds plus a filling readiness line. Empty main and Chaos slots take no screen space.
+### PVP blowgun, deaths and luggage
 
-The last racer to personally activate each campfire also receives one separate **Chaos** charge, stored in addition to the main slot and activated with **C** by default. Its configurable weighted roll can restore stamina, grant global Adrenaline, knock everyone unconscious, swap racers between recorded safe positions, or move racers to a previous or middle campfire. Only one Chaos charge can be stored.
+- Ordinary luggage has a **50% chance** to replace one rolled reward with the crimson PVP blowgun. Respawn chests are excluded.
+- A victim knocked unconscious by this special blowgun drops their pocket items and is sent immediately to their own previous campfire. This adds no time penalty and does not wait for a skeleton death.
+- Real skeleton deaths use the host's PVP death penalty and either **Previous fire** or **Corpse timer**. Next-fire respawning is disabled because it would bypass the required personal claim.
+- Opened luggage can optionally close and roll fresh loot after **30-1800 seconds**. This is disabled by default; the default enabled delay is **300 seconds**. Collected items are never removed and respawn chests never refresh.
 
-Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Its host-configurable per-item chance rises from **1.5%** for the leader to **18%** for a racer far behind. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
+### Ability inventory and controls
+
+| Slot | Capacity | How it is received | Use |
+| --- | ---: | --- | --- |
+| Main Campfire Ability | 1 | One weighted roll at the start of the run and one after every personal campfire activation | **F** for active abilities; passive abilities trigger automatically |
+| Chaos | 1 | Awarded to the last racer who personally completes each campfire | **C** |
+
+The starting roll uses the same host-configured weights as campfire rewards, so every racer has an ability in the first biome. Receiving a new main ability always replaces the previous one, even if it was unused. Active abilities are consumed after a valid use, except **Mega Launch**, which remains stored and uses a cooldown. Chaos is a separate one-charge slot and is never included in the starting roll.
+
+The **F** and **C** bindings are personal client settings and can be changed in RaceToThePeak's BepInEx config. Pressing **F** while holding a passive ability only reports that it is passive; it does not consume it.
+
+### Main ability pool
+
+Weights are relative rather than percentages. Setting a weight to `0` disables that result; if every weight is `0`, Adrenaline is used as the safe fallback.
+
+| Ability | Type | Default weight | Effect |
+| --- | --- | ---: | --- |
+| **Adrenaline** | Active, one use | 12 | Applies the original Lollipop and Energy Drink effects together. |
+| **Shield** | Passive, one block | 12 | Blocks and consumes itself against the next directed Exhaust, Recall or Ghost Runner. |
+| **Exhaust** | Active, one use | 12 | Targets a random racer ahead and increases their stamina use by 40% for 8 seconds. It is not consumed when no valid target exists. |
+| **Second Wind** | Passive, one recovery | 12 | Automatically recovers the owner from the next ordinary unconscious state and grants 2 seconds of protection. |
+| **Catch Up** | Passive while held | 12 | Improves movement, jumping, climbing and stamina recovery by 5-25% according to the gap to the leader. The last-place racer also qualifies for this gap-based aid without holding the ability. |
+| **Recall** | Active, one use | 10 | After a warning, returns the living leader to their previous campfire when the lead is at least one checkpoint or otherwise large enough. |
+| **Chaos Horn** | Active, one use | 10 | Removes bonus stamina from every other living non-ghost racer. This is a main ability, not the separate Chaos slot. |
+| **Ghost Runner** | Active, one use | 8 | While the owner is a ghost, increases the spectated living target's stamina use by 20% for 15 seconds. |
+| **Mega Launch** | Active, reusable | 12 | After a five-second countdown, launches the owner in their current look direction. Force and cooldown are host-configurable. |
+
+### Chaos effects
+
+Only one Chaos charge can be stored. Activating it with **C** consumes the charge and rolls one synchronized effect from a separately weighted pool.
+
+| Effect | Default weight | Result |
+| --- | ---: | --- |
+| **Full Stamina** | 22 | Restores stamina to every living racer. |
+| **Infinite Stamina** | 18 | Grants every living racer infinite stamina for 5 seconds. |
+| **Global Adrenaline** | 18 | Applies Adrenaline to every living racer. |
+| **Global Unconscious** | 16 | Warns everyone, then knocks all living racers unconscious after 10 seconds. |
+| **Player Swap** | 12 | Randomly pairs living racers and swaps them between their recorded safe positions. |
+| **Previous Campfire** | 10 | Moves all living racers to their own previous campfires. |
+| **Middle Campfire** | 4 | Moves all living racers to a middle campfire without claiming that destination for them. |
+
+### Ability HUD
+
+The in-run HUD uses a floating, cardless icon stack at the left-center of the screen, away from PEAK's teammate respawn timer, stamina, status and inventory UI. It shows only slots and bonuses currently owned. Ready active abilities have a bright underline, passive abilities use blue, and a cooling-down Mega Launch is dimmed with remaining seconds and a filling readiness line.
+
+### PVP-only Airport settings
+
+The following controls appear in the host's **F3** lobby panel only while **PVP** is selected:
+
+- PVP death penalty and real-death destination.
+- Optional opened-luggage refresh and its delay.
+- Relative weight for every main ability and every Chaos effect.
+- Mega Launch cooldown and launch force.
+- Hidden Mega Launch Food chances for the leader, middle, near-last, last-place and far-behind tiers.
+
+These rules synchronize to all clients, remain stable if the host changes and lock when the run starts. Personal **F/C** key bindings are not controlled by the host.
+
+### Hidden Mega Launch Food
+
+Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Default per-item chances are **1.5%** for the leader, **4%** for the middle, **7%** for near-last, **12.5%** for last place and **18%** when at least 1.5 segments behind the leader. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
 
 During a run, the same configured key (**F3** by default) opens a separate host-only race controls panel in every respawn mode. Its confirmed **End current run** action uses PEAK's normal networked results flow, allowing an unfinished run to end in defeat and the existing room to return to the Airport without recreating the lobby. Guests cannot open or use this panel.
 
