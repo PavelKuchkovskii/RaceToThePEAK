@@ -10,7 +10,7 @@
 * Added all gameplay-affecting PVP ability, Chaos, Mega Launch and hidden-food tuning to the host lobby panel. The section exists only while PVP is selected, synchronizes through room properties and remains stable across host migration.
 * Changed the default PVP controls to F for the main ability and C for Chaos, including a one-time migration from the previous F4/F5 defaults.
 * Added embedded 256px icons for every Campfire Ability and Chaos, plus ready, passive and numeric cooldown HUD states with a visual recharge bar.
-* Moved the ability HUD into compact dynamic cards in the upper-right. Empty slots are hidden, preventing overlap with PEAK's stamina, status and inventory interface.
+* Reworked the ability HUD as a floating, cardless icon stack on the left-center of the screen. It avoids the teammate respawn timer and PEAK's stamina, status and inventory interface while retaining clear cooldown feedback.
 
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.

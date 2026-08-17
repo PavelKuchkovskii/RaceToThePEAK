@@ -16,12 +16,10 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
 
     private Texture2D whiteTexture;
     private Texture2D chaosIcon;
-    private GUIStyle titleStyle;
     private GUIStyle abilityStyle;
     private GUIStyle hintStyle;
     private GUIStyle feedbackStyle;
     private GUIStyle iconOverlayStyle;
-    private GUIStyle badgeStyle;
 
     private void Awake()
     {
@@ -55,13 +53,11 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
             ? 1f - Mathf.Clamp01(
                 (float)(megaCooldown / Math.Max(1f, manager.MegaLaunchCooldownSeconds)))
             : -1f;
-        Color abilityBorder = ability == CampfireAbility.None
-            ? new Color(0.38f, 0.38f, 0.38f, 1f)
-            : coolingDown
-                ? new Color(0.48f, 0.48f, 0.48f, 1f)
-                : passive
-                    ? new Color(0.35f, 0.82f, 1f, 1f)
-                    : new Color(0.43f, 1f, 0.55f, 1f);
+        Color abilityColor = coolingDown
+            ? new Color(0.62f, 0.62f, 0.62f, 1f)
+            : passive
+                ? new Color(0.35f, 0.82f, 1f, 1f)
+                : Plugin.Color;
         float catchUpMultiplier = manager.GetCatchUpMultiplier(localCharacter);
         bool hasSystemCatchUp = manager.HasSystemCatchUp(localCharacter);
         string abilityHint = coolingDown
@@ -73,100 +69,84 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
                         : $"{manager.AbilityKeyDisplayName}: ACTIVATE";
 
         Rect safeArea = Screen.safeArea;
-        float right = safeArea.xMax - 18f;
-        float cursorY = Screen.height - safeArea.yMax + 18f;
-        const float cardWidth = 300f;
-        const float cardHeight = 82f;
-        float cardX = right - cardWidth;
+        float safeTop = Screen.height - safeArea.yMax;
+        float safeBottom = Screen.height - safeArea.yMin;
+        float minY = safeTop + 130f;
+        float maxY = Mathf.Max(minY, safeBottom - 210f);
+        float cursorY = Mathf.Clamp(Screen.height * 0.54f, minY, maxY);
+        float left = safeArea.xMin + 22f;
+        float textX = left + 82f;
+        float textWidth = Mathf.Max(120f, Mathf.Min(310f, safeArea.xMax - textX - 18f));
         if (ability != CampfireAbility.None)
         {
-            Rect card = new(cardX, cursorY, cardWidth, cardHeight);
-            DrawSolidRect(
-                card,
-                new Color(abilityBorder.r, abilityBorder.g, abilityBorder.b, 0.78f));
-            DrawSolidRect(
-                new Rect(card.x + 2f, card.y + 2f, card.width - 4f, card.height - 4f),
-                new Color(0.02f, 0.02f, 0.025f, 0.78f));
-
             abilityIcons.TryGetValue(ability, out Texture2D abilityIcon);
-            DrawFramedIcon(
-                new Rect(card.x + 9f, card.y + 9f, 64f, 64f),
+            DrawFloatingIcon(
+                new Rect(left, cursorY, 68f, 68f),
                 abilityIcon,
-                abilityBorder,
+                abilityColor,
                 dimmed: coolingDown,
                 coolingDown ? Mathf.CeilToInt((float)megaCooldown).ToString() : null,
                 cooldownProgress);
 
-            GUI.color = Plugin.Color;
-            GUI.Label(
-                new Rect(card.x + 82f, card.y + 4f, card.width - 94f, 17f),
-                "CAMPFIRE ABILITY",
-                titleStyle);
-            GUI.color = Color.white;
-            GUI.Label(
-                new Rect(card.x + 82f, card.y + 21f, card.width - 94f, 28f),
+            DrawOutlinedLabel(
+                new Rect(textX, cursorY + 5f, textWidth, 30f),
                 CampfireAbilityInfo.GetName(ability),
-                abilityStyle);
-            GUI.Label(
-                new Rect(card.x + 82f, card.y + 51f, card.width - 94f, 22f),
+                abilityStyle,
+                Color.white,
+                2f);
+            DrawOutlinedLabel(
+                new Rect(textX, cursorY + 36f, textWidth, 22f),
                 abilityHint,
-                hintStyle);
+                hintStyle,
+                abilityColor,
+                1f);
 
             if (hasSystemCatchUp)
             {
-                Rect badge = new(card.x + card.width - 108f, card.y + 4f, 100f, 18f);
-                DrawSolidRect(badge, new Color(0.08f, 0.36f, 0.46f, 0.9f));
-                GUI.color = new Color(0.55f, 0.95f, 1f, 1f);
-                GUI.Label(
-                    badge,
-                    $"LAST +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
-                    badgeStyle);
+                DrawOutlinedLabel(
+                    new Rect(textX, cursorY + 57f, textWidth, 19f),
+                    $"LAST PLACE  +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
+                    hintStyle,
+                    new Color(0.55f, 0.95f, 1f, 1f),
+                    1f);
             }
 
-            cursorY += cardHeight + 8f;
+            cursorY += hasSystemCatchUp ? 90f : 80f;
         }
 
         bool hasChaos = manager.HasChaos(localCharacter);
         if (hasChaos)
         {
             Color chaosColor = new(1f, 0.34f, 0.23f, 1f);
-            const float chaosWidth = 188f;
-            const float chaosHeight = 44f;
-            Rect chaosCard = new(right - chaosWidth, cursorY, chaosWidth, chaosHeight);
-            DrawSolidRect(
-                chaosCard,
-                new Color(chaosColor.r, chaosColor.g, chaosColor.b, 0.8f));
-            DrawSolidRect(
-                new Rect(
-                    chaosCard.x + 2f,
-                    chaosCard.y + 2f,
-                    chaosCard.width - 4f,
-                    chaosCard.height - 4f),
-                new Color(0.02f, 0.02f, 0.025f, 0.8f));
-            DrawFramedIcon(
-                new Rect(chaosCard.x + 5f, chaosCard.y + 5f, 34f, 34f),
+            DrawFloatingIcon(
+                new Rect(left + 7f, cursorY, 54f, 54f),
                 chaosIcon,
                 chaosColor,
                 dimmed: false,
                 overlayText: null,
                 progress: -1f);
-            GUI.color = chaosColor;
-            GUI.Label(
-                new Rect(chaosCard.x + 47f, chaosCard.y + 8f, chaosCard.width - 54f, 28f),
-                $"CHAOS  •  {manager.ChaosKeyDisplayName}: ACTIVATE",
-                hintStyle);
-            cursorY += chaosHeight + 8f;
+            DrawOutlinedLabel(
+                new Rect(textX, cursorY + 2f, textWidth, 26f),
+                "CHAOS",
+                abilityStyle,
+                Color.white,
+                2f);
+            DrawOutlinedLabel(
+                new Rect(textX, cursorY + 28f, textWidth, 22f),
+                $"{manager.ChaosKeyDisplayName}: ACTIVATE",
+                hintStyle,
+                chaosColor,
+                1f);
         }
 
         if (ability == CampfireAbility.None && hasSystemCatchUp)
         {
-            Rect badge = new(right - 154f, cursorY, 154f, 28f);
-            DrawSolidRect(badge, new Color(0.03f, 0.18f, 0.23f, 0.84f));
-            GUI.color = new Color(0.55f, 0.95f, 1f, 1f);
-            GUI.Label(
-                badge,
+            DrawOutlinedLabel(
+                new Rect(left, cursorY + (hasChaos ? 62f : 0f), 260f, 24f),
                 $"LAST PLACE  +{Mathf.RoundToInt((catchUpMultiplier - 1f) * 100f)}%",
-                badgeStyle);
+                hintStyle,
+                new Color(0.55f, 0.95f, 1f, 1f),
+                1f);
         }
 
         if (manager.TryGetFeedback(out string feedback, out Color feedbackColor))
@@ -176,64 +156,85 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
                 Screen.height * 0.19f,
                 Mathf.Min(520f, Screen.width - 32f),
                 54f);
-            DrawSolidRect(feedbackRect, new Color(0f, 0f, 0f, 0.84f));
-            GUI.color = feedbackColor;
-            GUI.Label(feedbackRect, feedback, feedbackStyle);
+            DrawOutlinedLabel(feedbackRect, feedback, feedbackStyle, feedbackColor, 3f);
         }
 
         GUI.color = Color.white;
         GUI.depth = previousDepth;
     }
 
-    private void DrawFramedIcon(
+    private void DrawFloatingIcon(
         Rect rect,
         Texture2D icon,
-        Color borderColor,
+        Color accentColor,
         bool dimmed,
         string overlayText,
         float progress)
     {
-        DrawSolidRect(rect, borderColor);
-        Rect inner = new(rect.x + 3f, rect.y + 3f, rect.width - 6f, rect.height - 6f);
-        DrawSolidRect(inner, new Color(0.025f, 0.025f, 0.035f, 0.96f));
-        Rect content = new(inner.x + 3f, inner.y + 3f, inner.width - 6f, inner.height - 6f);
-
         if (icon != null)
         {
+            GUI.color = new Color(0f, 0f, 0f, 0.58f);
+            GUI.DrawTexture(
+                new Rect(rect.x + 4f, rect.y + 5f, rect.width, rect.height),
+                icon,
+                ScaleMode.ScaleToFit,
+                alphaBlend: true);
             GUI.color = dimmed
-                ? new Color(0.42f, 0.42f, 0.42f, 0.82f)
+                ? new Color(0.42f, 0.42f, 0.42f, 0.68f)
                 : Color.white;
-            GUI.DrawTexture(content, icon, ScaleMode.ScaleToFit, alphaBlend: true);
+            GUI.DrawTexture(rect, icon, ScaleMode.ScaleToFit, alphaBlend: true);
         }
         else
         {
-            GUI.color = new Color(0.55f, 0.55f, 0.55f, 1f);
-            GUI.Label(content, "—", iconOverlayStyle);
+            DrawOutlinedLabel(rect, "—", iconOverlayStyle, Color.white, 2f);
         }
 
-        if (dimmed)
-        {
-            DrawSolidRect(content, new Color(0f, 0f, 0f, 0.48f));
-        }
-
+        Rect progressTrack = new(rect.x + 9f, rect.yMax + 1f, rect.width - 18f, 4f);
+        DrawSolidRect(
+            new Rect(progressTrack.x + 2f, progressTrack.y + 2f, progressTrack.width, progressTrack.height),
+            new Color(0f, 0f, 0f, 0.66f));
         if (progress >= 0f)
         {
-            Rect bar = new(content.x, content.yMax - 7f, content.width, 7f);
-            DrawSolidRect(bar, new Color(0.08f, 0.08f, 0.08f, 0.95f));
+            DrawSolidRect(progressTrack, new Color(0.18f, 0.18f, 0.18f, 0.9f));
             if (progress > 0f)
             {
                 DrawSolidRect(
-                    new Rect(bar.x, bar.y, bar.width * Mathf.Clamp01(progress), bar.height),
-                    Plugin.Color);
+                    new Rect(
+                        progressTrack.x,
+                        progressTrack.y,
+                        progressTrack.width * Mathf.Clamp01(progress),
+                        progressTrack.height),
+                    accentColor);
             }
+        }
+        else
+        {
+            DrawSolidRect(progressTrack, accentColor);
         }
 
         if (!string.IsNullOrEmpty(overlayText))
         {
-            GUI.color = Color.white;
-            GUI.Label(content, overlayText, iconOverlayStyle);
+            DrawOutlinedLabel(rect, overlayText, iconOverlayStyle, Color.white, 2f);
         }
         GUI.color = Color.white;
+    }
+
+    private static void DrawOutlinedLabel(
+        Rect rect,
+        string text,
+        GUIStyle style,
+        Color color,
+        float outline)
+    {
+        Color previousColor = GUI.color;
+        GUI.color = new Color(0f, 0f, 0f, 0.86f);
+        GUI.Label(new Rect(rect.x - outline, rect.y, rect.width, rect.height), text, style);
+        GUI.Label(new Rect(rect.x + outline, rect.y, rect.width, rect.height), text, style);
+        GUI.Label(new Rect(rect.x, rect.y - outline, rect.width, rect.height), text, style);
+        GUI.Label(new Rect(rect.x, rect.y + outline, rect.width, rect.height), text, style);
+        GUI.color = color;
+        GUI.Label(rect, text, style);
+        GUI.color = previousColor;
     }
 
     private void DrawSolidRect(Rect rect, Color color)
@@ -257,12 +258,10 @@ internal sealed class CampfireAbilityHUD : MonoBehaviour
             whiteTexture.Apply();
         }
 
-        titleStyle ??= CreateStyle(12, TextAnchor.MiddleLeft, FontStyle.Bold);
-        abilityStyle ??= CreateStyle(21, TextAnchor.MiddleLeft, FontStyle.Bold);
-        hintStyle ??= CreateStyle(13, TextAnchor.MiddleLeft, FontStyle.Bold);
-        feedbackStyle ??= CreateStyle(22, TextAnchor.MiddleCenter, FontStyle.Bold);
-        iconOverlayStyle ??= CreateStyle(24, TextAnchor.MiddleCenter, FontStyle.Bold);
-        badgeStyle ??= CreateStyle(12, TextAnchor.MiddleCenter, FontStyle.Bold);
+        abilityStyle ??= CreateStyle(23, TextAnchor.MiddleLeft, FontStyle.Bold);
+        hintStyle ??= CreateStyle(14, TextAnchor.MiddleLeft, FontStyle.Bold);
+        feedbackStyle ??= CreateStyle(24, TextAnchor.MiddleCenter, FontStyle.Bold);
+        iconOverlayStyle ??= CreateStyle(25, TextAnchor.MiddleCenter, FontStyle.Bold);
     }
 
     private void LoadIcons()
