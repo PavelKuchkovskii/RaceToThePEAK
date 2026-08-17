@@ -275,7 +275,13 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 
         character.refs.movement.CapFallDamage(0f, 15f);
         character.data.sinceGrounded = 0f;
-        character.AddForce(direction.normalized * force);
+        Vector3 launchForce = direction.normalized * force;
+
+        // Character also exposes AddForce(object), but that compatibility stub
+        // throws NotImplementedException. Supplying the multiplier range binds
+        // to PEAK's real ragdoll-force API and applies one deterministic impulse
+        // to every body part owned by this client.
+        character.AddForce(launchForce, 1f, 1f);
     }
 
     private IEnumerator MaintainMegaLaunchProtection()
