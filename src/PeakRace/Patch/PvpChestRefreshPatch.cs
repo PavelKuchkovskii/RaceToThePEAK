@@ -81,9 +81,9 @@ internal static class PvpChestRefreshPatch
         RequestFromItemAction(__instance);
     }
 
-    // Multi-use food runs Action_ReduceUses for every completed bite and only
-    // reaches Action_Consume after its final portion. Hidden food must reveal
-    // itself on the first completed bite, not when the empty wrapper vanishes.
+    // PEAK commits a completed food use through Action_ReduceUses, including
+    // food exhausted in a single use. Action_Consume is a later removal path
+    // and is not a reliable gameplay trigger for the hidden effect.
     private static void BeforeReduceUsesAction(Action_ReduceUses __instance)
     {
         RequestFromItemAction(__instance);
