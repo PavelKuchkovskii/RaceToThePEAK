@@ -154,7 +154,10 @@ internal sealed class RaceSettingsMenu : MenuWindow
         float y = 0f;
         DrawProgressionSection(manager, settings, viewWidth, ref y);
         DrawRespawnSection(manager, settings, viewWidth, ref y);
-        DrawPvpSection(manager, settings, viewWidth, ref y);
+        if (settings.Mode == RespawnMode.Pvp)
+        {
+            DrawPvpSection(manager, settings, viewWidth, ref y);
+        }
         GUI.enabled = true;
         DrawCurrentRulesSection(settings, viewWidth, ref y);
         measuredContentHeight = y + 12f;
@@ -308,17 +311,6 @@ internal sealed class RaceSettingsMenu : MenuWindow
         ref float y)
     {
         DrawSectionTitle("PVP", width, ref y);
-        if (settings.Mode != RespawnMode.Pvp)
-        {
-            DrawBody(
-                "PVP controls are hidden until PVP is selected as the respawn mode.",
-                width,
-                ref y,
-                38f);
-            DrawDivider(width, ref y);
-            return;
-        }
-
         DrawBody(
             "The crimson blowgun always sends its knocked-out victim to the previous campfire immediately and adds no penalty. "
             + "The setting below applies only to a real skeleton death.",
@@ -381,6 +373,127 @@ internal sealed class RaceSettingsMenu : MenuWindow
                 "sec",
                 () => manager.AdjustPvpChestRefreshSeconds(-30),
                 () => manager.AdjustPvpChestRefreshSeconds(30));
+        }
+
+        CampfireAbilityManager abilityManager = CampfireAbilityManager.Instance;
+        if (abilityManager != null)
+        {
+            DrawDivider(width, ref y);
+            DrawSectionTitle("CAMPFIRE ABILITY WEIGHTS", width, ref y);
+            DrawBody(
+                "Relative weights control how often each ability is rolled. Set a weight to 0 to disable that ability.",
+                width,
+                ref y,
+                42f);
+            CampfireAbility[] abilities =
+            {
+                CampfireAbility.Adrenaline,
+                CampfireAbility.Shield,
+                CampfireAbility.Exhaust,
+                CampfireAbility.SecondWind,
+                CampfireAbility.CatchUp,
+                CampfireAbility.Recall,
+                CampfireAbility.ChaosHorn,
+                CampfireAbility.GhostRunner,
+                CampfireAbility.MegaLaunch
+            };
+            foreach (CampfireAbility ability in abilities)
+            {
+                DrawFloatRow(
+                    width,
+                    ref y,
+                    CampfireAbilityInfo.GetName(ability),
+                    abilityManager.GetAbilityWeight(ability),
+                    string.Empty,
+                    () => abilityManager.AdjustAbilityWeight(ability, -1f),
+                    () => abilityManager.AdjustAbilityWeight(ability, 1f));
+            }
+
+            DrawDivider(width, ref y);
+            DrawSectionTitle("CHAOS WEIGHTS", width, ref y);
+            DrawBody(
+                "The last racer at each campfire receives one Chaos charge. These weights control its global effect.",
+                width,
+                ref y,
+                42f);
+            ChaosEffect[] chaosEffects =
+            {
+                ChaosEffect.FullStamina,
+                ChaosEffect.InfiniteStamina,
+                ChaosEffect.GlobalAdrenaline,
+                ChaosEffect.GlobalUnconscious,
+                ChaosEffect.PlayerSwap,
+                ChaosEffect.PreviousCampfire,
+                ChaosEffect.MiddleCampfire
+            };
+            foreach (ChaosEffect effect in chaosEffects)
+            {
+                DrawFloatRow(
+                    width,
+                    ref y,
+                    FormatChaosEffectLabel(effect),
+                    abilityManager.GetChaosWeight(effect),
+                    string.Empty,
+                    () => abilityManager.AdjustChaosWeight(effect, -1f),
+                    () => abilityManager.AdjustChaosWeight(effect, 1f));
+            }
+
+            DrawDivider(width, ref y);
+            DrawSectionTitle("MEGA LAUNCH", width, ref y);
+            DrawFloatRow(
+                width,
+                ref y,
+                "Ability cooldown",
+                abilityManager.MegaLaunchCooldownSeconds,
+                "sec",
+                () => abilityManager.AdjustMegaLaunchCooldown(-5f),
+                () => abilityManager.AdjustMegaLaunchCooldown(5f));
+            DrawFloatRow(
+                width,
+                ref y,
+                "Launch force",
+                abilityManager.MegaLaunchForce,
+                string.Empty,
+                () => abilityManager.AdjustMegaLaunchForce(-5f),
+                () => abilityManager.AdjustMegaLaunchForce(5f));
+
+            DrawDivider(width, ref y);
+            DrawSectionTitle("HIDDEN MEGA LAUNCH FOOD", width, ref y);
+            DrawBody(
+                "Per-item chance for ordinary luggage food. The far-behind tier applies at a 1.5-segment gap.",
+                width,
+                ref y,
+                42f);
+            DrawMegaFoodChanceRow(
+                abilityManager,
+                MegaLaunchFoodChanceTier.Leader,
+                "Leader chance",
+                width,
+                ref y);
+            DrawMegaFoodChanceRow(
+                abilityManager,
+                MegaLaunchFoodChanceTier.Middle,
+                "Middle chance",
+                width,
+                ref y);
+            DrawMegaFoodChanceRow(
+                abilityManager,
+                MegaLaunchFoodChanceTier.NearLast,
+                "Near-last chance",
+                width,
+                ref y);
+            DrawMegaFoodChanceRow(
+                abilityManager,
+                MegaLaunchFoodChanceTier.Last,
+                "Last-place chance",
+                width,
+                ref y);
+            DrawMegaFoodChanceRow(
+                abilityManager,
+                MegaLaunchFoodChanceTier.FarBehind,
+                "Far-behind chance",
+                width,
+                ref y);
         }
 
         DrawDivider(width, ref y);
@@ -517,6 +630,60 @@ internal sealed class RaceSettingsMenu : MenuWindow
         y += RowHeight + 6f;
     }
 
+    private void DrawFloatRow(
+        float width,
+        ref float y,
+        string label,
+        float value,
+        string suffix,
+        Action decrease,
+        Action increase)
+    {
+        const float buttonWidth = 42f;
+        Rect row = new(0f, y, width, RowHeight);
+        GUI.Box(row, GUIContent.none);
+        GUI.Label(new Rect(10f, y, width - 170f, RowHeight), label, labelStyle);
+
+        float controlsX = width - 154f;
+        if (GUI.Button(
+            new Rect(controlsX, y + 5f, buttonWidth, RowHeight - 10f),
+            "−"))
+        {
+            decrease();
+        }
+        string formattedValue = string.IsNullOrEmpty(suffix)
+            ? $"{value:0.#}"
+            : $"{value:0.#} {suffix}";
+        GUI.Label(
+            new Rect(controlsX + buttonWidth + 4f, y, 64f, RowHeight),
+            formattedValue,
+            labelStyle);
+        if (GUI.Button(
+            new Rect(width - buttonWidth, y + 5f, buttonWidth, RowHeight - 10f),
+            "+"))
+        {
+            increase();
+        }
+        y += RowHeight + 6f;
+    }
+
+    private void DrawMegaFoodChanceRow(
+        CampfireAbilityManager manager,
+        MegaLaunchFoodChanceTier tier,
+        string label,
+        float width,
+        ref float y)
+    {
+        DrawFloatRow(
+            width,
+            ref y,
+            label,
+            manager.GetMegaLaunchFoodChance(tier),
+            "%",
+            () => manager.AdjustMegaLaunchFoodChance(tier, -0.5f),
+            () => manager.AdjustMegaLaunchFoodChance(tier, 0.5f));
+    }
+
     private void DrawSectionTitle(string title, float width, ref float y)
     {
         GUI.Label(new Rect(0f, y, width, 28f), title, sectionStyle);
@@ -571,6 +738,21 @@ internal sealed class RaceSettingsMenu : MenuWindow
                 "The fire activates only when every connected living player is in range. Loading, access, and the final rising hazard remain global.",
             _ =>
                 "The first living racer activates the fire, loads the next biome for everyone, and nobody else needs to claim that transition."
+        };
+    }
+
+    private static string FormatChaosEffectLabel(ChaosEffect effect)
+    {
+        return effect switch
+        {
+            ChaosEffect.FullStamina => "FULL STAMINA",
+            ChaosEffect.InfiniteStamina => "INFINITE STAMINA",
+            ChaosEffect.GlobalAdrenaline => "GLOBAL ADRENALINE",
+            ChaosEffect.GlobalUnconscious => "GLOBAL UNCONSCIOUS",
+            ChaosEffect.PlayerSwap => "PLAYER SWAP",
+            ChaosEffect.PreviousCampfire => "PREVIOUS CAMPFIRE",
+            ChaosEffect.MiddleCampfire => "MIDDLE CAMPFIRE",
+            _ => effect.ToString().ToUpperInvariant()
         };
     }
 

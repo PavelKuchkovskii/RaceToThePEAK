@@ -48,7 +48,7 @@ Disconnected players and bots are excluded. A player who did not select a troop 
 
 ## PVP Campfire Abilities
 
-Each personally completed campfire replaces the racer's previous main ability with one weighted random ability. Press **F4** by default to use an active main ability; passive abilities work automatically. Keys, Mega Launch tuning and every roll weight are configurable in RaceToThePeak's BepInEx config.
+Each personally completed campfire replaces the racer's previous main ability with one weighted random ability. Press **F4** by default to use an active main ability; passive abilities work automatically. When PVP is selected, the host lobby panel shows every ability weight, Chaos weight, Mega Launch parameter and hidden-food chance. These rules synchronize to the room and lock when the run starts. The personal F4/F5 key bindings remain in RaceToThePeak's BepInEx config.
 
 - **Adrenaline** applies the original Lollipop and Energy Drink effects together.
 - **Shield** passively consumes itself to block the next directed Exhaust, Recall or Ghost Runner.
@@ -62,7 +62,7 @@ Each personally completed campfire replaces the racer's previous main ability wi
 
 The last racer to personally activate each campfire also receives one separate **Chaos** charge, stored in addition to the main slot and activated with **F5** by default. Its configurable weighted roll can restore stamina, grant global Adrenaline, knock everyone unconscious, swap racers between recorded safe positions, or move racers to a previous or middle campfire. Only one Chaos charge can be stored.
 
-Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Its configurable per-item chance rises from **1.5%** for the leader to **18%** for a racer far behind. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
+Ordinary non-critical food from luggage can secretly become **Mega Launch Food** without changing its appearance, name or description. Its host-configurable per-item chance rises from **1.5%** for the leader to **18%** for a racer far behind. Eating it reveals a five-second warning and launches the consumer without replacing or requiring a Campfire Ability.
 
 During a run, the same configured key (**F3** by default) opens a separate host-only race controls panel in every respawn mode. Its confirmed **End current run** action uses PEAK's normal networked results flow, allowing an unfinished run to end in defeat and the existing room to return to the Airport without recreating the lobby. Guests cannot open or use this panel.
 

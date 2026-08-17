@@ -24,6 +24,15 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const string GhostRunnerUntilKeyPrefix = "RTP.GhostRunnerUntil.";
     private const string MegaCooldownUntilKeyPrefix = "RTP.MegaCooldownUntil.";
     private const string MegaLaunchFoodKeyPrefix = "RTP.MegaFood.";
+    private const string RuleAbilityWeightPrefix = "RTP.PvpRule.AbilityWeight.";
+    private const string RuleChaosWeightPrefix = "RTP.PvpRule.ChaosWeight.";
+    private const string RuleMegaCooldownKey = "RTP.PvpRule.MegaCooldown";
+    private const string RuleMegaForceKey = "RTP.PvpRule.MegaForce";
+    private const string RuleMegaFoodLeaderKey = "RTP.PvpRule.FoodLeader";
+    private const string RuleMegaFoodMiddleKey = "RTP.PvpRule.FoodMiddle";
+    private const string RuleMegaFoodNearLastKey = "RTP.PvpRule.FoodNearLast";
+    private const string RuleMegaFoodLastKey = "RTP.PvpRule.FoodLast";
+    private const string RuleMegaFoodFarBehindKey = "RTP.PvpRule.FoodFarBehind";
     private const float FeedbackSeconds = 3.5f;
     private const double ExhaustDurationSeconds = 8d;
     private const double SecondWindImmunitySeconds = 2d;
@@ -42,6 +51,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private readonly Dictionary<int, Vector3> lastSafePositions = new();
     private readonly Dictionary<CampfireAbility, ConfigEntry<float>> abilityWeights = new();
     private readonly Dictionary<ChaosEffect, ConfigEntry<float>> chaosWeights = new();
+    private readonly Dictionary<CampfireAbility, float> activeAbilityWeights = new();
+    private readonly Dictionary<ChaosEffect, float> activeChaosWeights = new();
 
     private ConfigEntry<Key> abilityKeyConfig;
     private ConfigEntry<Key> chaosKeyConfig;
@@ -52,10 +63,18 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private ConfigEntry<float> megaFoodNearLastChanceConfig;
     private ConfigEntry<float> megaFoodLastChanceConfig;
     private ConfigEntry<float> megaFoodFarBehindChanceConfig;
+    private float activeMegaLaunchCooldown;
+    private float activeMegaLaunchForce;
+    private float activeMegaFoodLeaderChance;
+    private float activeMegaFoodMiddleChance;
+    private float activeMegaFoodNearLastChance;
+    private float activeMegaFoodLastChance;
+    private float activeMegaFoodFarBehindChance;
     private string feedbackText;
     private Color feedbackColor = Color.white;
     private float feedbackUntil;
     private bool initialized;
+    private bool suppressPvpConfigEvents;
     private bool clearedOutsideRun;
     private float nextCatchUpRefreshTime;
     private float nextSafePositionRefreshTime;
@@ -149,8 +168,119 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         BindChaosWeight(config, ChaosEffect.PlayerSwap, 12f);
         BindChaosWeight(config, ChaosEffect.PreviousCampfire, 10f);
         BindChaosWeight(config, ChaosEffect.MiddleCampfire, 4f);
+        LoadActivePvpRulesFromLocalConfig();
+        SetPvpConfigSubscriptions(subscribe: true);
         initialized = true;
+
+        if (PhotonNetwork.InRoom)
+        {
+            if (PhotonNetwork.IsMasterClient
+                && SceneManager.GetActiveScene().name == "Airport")
+            {
+                PublishLocalPvpRules();
+            }
+            else
+            {
+                ApplyRoomProperties(PhotonNetwork.CurrentRoom?.CustomProperties);
+            }
+        }
     }
+
+    internal float GetAbilityWeight(CampfireAbility ability)
+    {
+        return activeAbilityWeights.TryGetValue(ability, out float weight)
+            ? weight
+            : 0f;
+    }
+
+    internal float GetChaosWeight(ChaosEffect effect)
+    {
+        return activeChaosWeights.TryGetValue(effect, out float weight)
+            ? weight
+            : 0f;
+    }
+
+    internal float MegaLaunchCooldownSeconds => activeMegaLaunchCooldown;
+
+    internal float MegaLaunchForce => activeMegaLaunchForce;
+
+    internal float GetMegaLaunchFoodChance(MegaLaunchFoodChanceTier tier)
+    {
+        return tier switch
+        {
+            MegaLaunchFoodChanceTier.Leader => activeMegaFoodLeaderChance,
+            MegaLaunchFoodChanceTier.Middle => activeMegaFoodMiddleChance,
+            MegaLaunchFoodChanceTier.NearLast => activeMegaFoodNearLastChance,
+            MegaLaunchFoodChanceTier.Last => activeMegaFoodLastChance,
+            MegaLaunchFoodChanceTier.FarBehind => activeMegaFoodFarBehindChance,
+            _ => 0f
+        };
+    }
+
+    internal void AdjustAbilityWeight(CampfireAbility ability, float delta)
+    {
+        if (CanEditPvpRules && abilityWeights.TryGetValue(ability, out ConfigEntry<float> entry))
+        {
+            entry.Value = Mathf.Clamp(entry.Value + delta, 0f, 1000f);
+        }
+    }
+
+    internal void AdjustChaosWeight(ChaosEffect effect, float delta)
+    {
+        if (CanEditPvpRules && chaosWeights.TryGetValue(effect, out ConfigEntry<float> entry))
+        {
+            entry.Value = Mathf.Clamp(entry.Value + delta, 0f, 1000f);
+        }
+    }
+
+    internal void AdjustMegaLaunchCooldown(float delta)
+    {
+        if (CanEditPvpRules)
+        {
+            megaLaunchCooldownConfig.Value = Mathf.Clamp(
+                megaLaunchCooldownConfig.Value + delta,
+                5f,
+                300f);
+        }
+    }
+
+    internal void AdjustMegaLaunchForce(float delta)
+    {
+        if (CanEditPvpRules)
+        {
+            megaLaunchForceConfig.Value = Mathf.Clamp(
+                megaLaunchForceConfig.Value + delta,
+                10f,
+                250f);
+        }
+    }
+
+    internal void AdjustMegaLaunchFoodChance(
+        MegaLaunchFoodChanceTier tier,
+        float delta)
+    {
+        if (!CanEditPvpRules)
+        {
+            return;
+        }
+
+        ConfigEntry<float> entry = tier switch
+        {
+            MegaLaunchFoodChanceTier.Leader => megaFoodLeaderChanceConfig,
+            MegaLaunchFoodChanceTier.Middle => megaFoodMiddleChanceConfig,
+            MegaLaunchFoodChanceTier.NearLast => megaFoodNearLastChanceConfig,
+            MegaLaunchFoodChanceTier.Last => megaFoodLastChanceConfig,
+            MegaLaunchFoodChanceTier.FarBehind => megaFoodFarBehindChanceConfig,
+            _ => null
+        };
+        if (entry != null)
+        {
+            entry.Value = Mathf.Clamp(entry.Value + delta, 0f, 100f);
+        }
+    }
+
+    private bool CanEditPvpRules => RaceSettingsManager.Instance?.CanEditLobbySettings == true
+        && RaceSettingsManager.Current.Mode == RespawnMode.Pvp;
 
     private static ConfigEntry<float> BindMegaFoodChance(
         ConfigFile config,
@@ -193,6 +323,186 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             new ConfigDescription(
                 $"Relative roll weight for the {effect} Chaos effect. Zero disables it.",
                 new AcceptableValueRange<float>(0f, 1000f)));
+    }
+
+    private void LoadActivePvpRulesFromLocalConfig()
+    {
+        activeAbilityWeights.Clear();
+        foreach ((CampfireAbility ability, ConfigEntry<float> entry) in abilityWeights)
+        {
+            activeAbilityWeights[ability] = Mathf.Clamp(entry.Value, 0f, 1000f);
+        }
+
+        activeChaosWeights.Clear();
+        foreach ((ChaosEffect effect, ConfigEntry<float> entry) in chaosWeights)
+        {
+            activeChaosWeights[effect] = Mathf.Clamp(entry.Value, 0f, 1000f);
+        }
+
+        activeMegaLaunchCooldown = Mathf.Clamp(
+            megaLaunchCooldownConfig.Value,
+            5f,
+            300f);
+        activeMegaLaunchForce = Mathf.Clamp(
+            megaLaunchForceConfig.Value,
+            10f,
+            250f);
+        activeMegaFoodLeaderChance = Mathf.Clamp(
+            megaFoodLeaderChanceConfig.Value,
+            0f,
+            100f);
+        activeMegaFoodMiddleChance = Mathf.Clamp(
+            megaFoodMiddleChanceConfig.Value,
+            0f,
+            100f);
+        activeMegaFoodNearLastChance = Mathf.Clamp(
+            megaFoodNearLastChanceConfig.Value,
+            0f,
+            100f);
+        activeMegaFoodLastChance = Mathf.Clamp(
+            megaFoodLastChanceConfig.Value,
+            0f,
+            100f);
+        activeMegaFoodFarBehindChance = Mathf.Clamp(
+            megaFoodFarBehindChanceConfig.Value,
+            0f,
+            100f);
+    }
+
+    private void SetPvpConfigSubscriptions(bool subscribe)
+    {
+        foreach (ConfigEntry<float> entry in abilityWeights.Values)
+        {
+            if (subscribe)
+            {
+                entry.SettingChanged += OnPvpRuleConfigChanged;
+            }
+            else
+            {
+                entry.SettingChanged -= OnPvpRuleConfigChanged;
+            }
+        }
+
+        foreach (ConfigEntry<float> entry in chaosWeights.Values)
+        {
+            if (subscribe)
+            {
+                entry.SettingChanged += OnPvpRuleConfigChanged;
+            }
+            else
+            {
+                entry.SettingChanged -= OnPvpRuleConfigChanged;
+            }
+        }
+
+        ConfigEntry<float>[] scalarEntries =
+        {
+            megaLaunchCooldownConfig,
+            megaLaunchForceConfig,
+            megaFoodLeaderChanceConfig,
+            megaFoodMiddleChanceConfig,
+            megaFoodNearLastChanceConfig,
+            megaFoodLastChanceConfig,
+            megaFoodFarBehindChanceConfig
+        };
+        foreach (ConfigEntry<float> entry in scalarEntries)
+        {
+            if (subscribe)
+            {
+                entry.SettingChanged += OnPvpRuleConfigChanged;
+            }
+            else
+            {
+                entry.SettingChanged -= OnPvpRuleConfigChanged;
+            }
+        }
+    }
+
+    private void StoreActivePvpRulesInLocalConfig()
+    {
+        suppressPvpConfigEvents = true;
+        try
+        {
+            foreach ((CampfireAbility ability, float weight) in activeAbilityWeights)
+            {
+                if (abilityWeights.TryGetValue(ability, out ConfigEntry<float> entry))
+                {
+                    entry.Value = weight;
+                }
+            }
+            foreach ((ChaosEffect effect, float weight) in activeChaosWeights)
+            {
+                if (chaosWeights.TryGetValue(effect, out ConfigEntry<float> entry))
+                {
+                    entry.Value = weight;
+                }
+            }
+
+            megaLaunchCooldownConfig.Value = activeMegaLaunchCooldown;
+            megaLaunchForceConfig.Value = activeMegaLaunchForce;
+            megaFoodLeaderChanceConfig.Value = activeMegaFoodLeaderChance;
+            megaFoodMiddleChanceConfig.Value = activeMegaFoodMiddleChance;
+            megaFoodNearLastChanceConfig.Value = activeMegaFoodNearLastChance;
+            megaFoodLastChanceConfig.Value = activeMegaFoodLastChance;
+            megaFoodFarBehindChanceConfig.Value = activeMegaFoodFarBehindChance;
+        }
+        finally
+        {
+            suppressPvpConfigEvents = false;
+        }
+    }
+
+    private void OnPvpRuleConfigChanged(object sender, EventArgs eventArgs)
+    {
+        if (!initialized || suppressPvpConfigEvents)
+        {
+            return;
+        }
+
+        if (!PhotonNetwork.InRoom)
+        {
+            LoadActivePvpRulesFromLocalConfig();
+        }
+        else if (PhotonNetwork.IsMasterClient
+            && SceneManager.GetActiveScene().name == "Airport")
+        {
+            PublishLocalPvpRules();
+        }
+    }
+
+    private void PublishLocalPvpRules()
+    {
+        LoadActivePvpRulesFromLocalConfig();
+        if (!PhotonNetwork.InRoom
+            || !PhotonNetwork.IsMasterClient
+            || PhotonNetwork.CurrentRoom == null)
+        {
+            return;
+        }
+
+        Hashtable properties = new()
+        {
+            [RuleMegaCooldownKey] = activeMegaLaunchCooldown,
+            [RuleMegaForceKey] = activeMegaLaunchForce,
+            [RuleMegaFoodLeaderKey] = activeMegaFoodLeaderChance,
+            [RuleMegaFoodMiddleKey] = activeMegaFoodMiddleChance,
+            [RuleMegaFoodNearLastKey] = activeMegaFoodNearLastChance,
+            [RuleMegaFoodLastKey] = activeMegaFoodLastChance,
+            [RuleMegaFoodFarBehindKey] = activeMegaFoodFarBehindChance
+        };
+        foreach ((CampfireAbility ability, float weight) in activeAbilityWeights)
+        {
+            properties[RuleAbilityWeightKey(ability)] = weight;
+        }
+        foreach ((ChaosEffect effect, float weight) in activeChaosWeights)
+        {
+            properties[RuleChaosWeightKey(effect)] = weight;
+        }
+
+        if (!PhotonNetwork.CurrentRoom.SetCustomProperties(properties))
+        {
+            Plugin.Log.LogWarning("Photon rejected the PVP ability rule update.");
+        }
     }
 
     private void Update()
@@ -522,7 +832,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
     private ChaosEffect RollChaosEffect()
     {
-        float total = chaosWeights.Values.Sum(entry => Mathf.Max(0f, entry.Value));
+        float total = activeChaosWeights.Values.Sum(weight => Mathf.Max(0f, weight));
         if (total <= 0f)
         {
             Plugin.Log.LogWarning(
@@ -531,10 +841,10 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
 
         float roll = UnityEngine.Random.Range(0f, total);
-        foreach ((ChaosEffect effect, ConfigEntry<float> entry) in chaosWeights
+        foreach ((ChaosEffect effect, float weight) in activeChaosWeights
             .OrderBy(pair => (int)pair.Key))
         {
-            roll -= Mathf.Max(0f, entry.Value);
+            roll -= Mathf.Max(0f, weight);
             if (roll <= 0f)
             {
                 return effect;
@@ -808,12 +1118,12 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
         int actorNumber = GetActorNumber(user);
         double launchAt = NetworkTime + 5d;
-        float force = megaLaunchForceConfig.Value;
+        float force = activeMegaLaunchForce;
         pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(
             launchAt,
             force,
             requiresAbility: true);
-        SetMegaCooldownUntil(user, NetworkTime + megaLaunchCooldownConfig.Value);
+        SetMegaCooldownUntil(user, NetworkTime + activeMegaLaunchCooldown);
         user.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
     }
 
@@ -908,7 +1218,7 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         double launchAt = NetworkTime + 5d;
         pendingMegaLaunches[actorNumber] = new PendingMegaLaunch(
             launchAt,
-            megaLaunchForceConfig.Value,
+            activeMegaLaunchForce,
             requiresAbility);
         character.GetComponent<CampfireAbilityState>()?.SendMegaLaunchCountdown(launchAt);
     }
@@ -922,25 +1232,25 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         int position = racers.IndexOf(opener);
         if (position <= 0 || racers.Count <= 1)
         {
-            return megaFoodLeaderChanceConfig.Value;
+            return activeMegaFoodLeaderChance;
         }
 
         float leaderScore = RaceProgress.ForCharacter(racers[0]).Score;
         float openerScore = RaceProgress.ForCharacter(opener).Score;
         if (leaderScore - openerScore >= 1.5f)
         {
-            return megaFoodFarBehindChanceConfig.Value;
+            return activeMegaFoodFarBehindChance;
         }
 
         if (position == racers.Count - 1)
         {
-            return megaFoodLastChanceConfig.Value;
+            return activeMegaFoodLastChance;
         }
 
         float fieldPosition = position / (float)(racers.Count - 1);
         return fieldPosition >= 0.75f
-            ? megaFoodNearLastChanceConfig.Value
-            : megaFoodMiddleChanceConfig.Value;
+            ? activeMegaFoodNearLastChance
+            : activeMegaFoodMiddleChance;
     }
 
     private static bool IsOrdinaryFood(Item item)
@@ -1191,11 +1501,11 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private CampfireAbility RollAbility()
     {
         float total = 0f;
-        foreach ((CampfireAbility ability, ConfigEntry<float> entry) in abilityWeights)
+        foreach ((CampfireAbility ability, float weight) in activeAbilityWeights)
         {
             if (ability != CampfireAbility.None)
             {
-                total += Mathf.Max(0f, entry.Value);
+                total += Mathf.Max(0f, weight);
             }
         }
 
@@ -1207,10 +1517,10 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         }
 
         float roll = UnityEngine.Random.Range(0f, total);
-        foreach ((CampfireAbility ability, ConfigEntry<float> entry) in abilityWeights
+        foreach ((CampfireAbility ability, float weight) in activeAbilityWeights
             .OrderBy(pair => (int)pair.Key))
         {
-            roll -= Mathf.Max(0f, entry.Value);
+            roll -= Mathf.Max(0f, weight);
             if (roll <= 0f)
             {
                 return ability;
@@ -1335,6 +1645,11 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             }
 
             object boxed = properties[rawKey];
+            if (TryApplyPvpRuleProperty(key, boxed))
+            {
+                continue;
+            }
+
             if (TryParseSuffix(key, AbilityKeyPrefix, out int abilityActor))
             {
                 if (boxed == null)
@@ -1459,6 +1774,115 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     megaLaunchFoodViewIds.Remove(foodViewId);
                 }
             }
+        }
+    }
+
+    private bool TryApplyPvpRuleProperty(string key, object boxed)
+    {
+        if (TryParseSuffix(key, RuleAbilityWeightPrefix, out int rawAbility))
+        {
+            if (Enum.IsDefined(typeof(CampfireAbility), rawAbility)
+                && (CampfireAbility)rawAbility != CampfireAbility.None
+                && TryConvertRuleFloat(key, boxed, 0f, 1000f, out float weight))
+            {
+                activeAbilityWeights[(CampfireAbility)rawAbility] = weight;
+            }
+            return true;
+        }
+
+        if (TryParseSuffix(key, RuleChaosWeightPrefix, out int rawEffect))
+        {
+            if (Enum.IsDefined(typeof(ChaosEffect), rawEffect)
+                && TryConvertRuleFloat(key, boxed, 0f, 1000f, out float weight))
+            {
+                activeChaosWeights[(ChaosEffect)rawEffect] = weight;
+            }
+            return true;
+        }
+
+        float scalar;
+        if (key == RuleMegaCooldownKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 5f, 300f, out scalar))
+            {
+                activeMegaLaunchCooldown = scalar;
+            }
+            return true;
+        }
+        if (key == RuleMegaForceKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 10f, 250f, out scalar))
+            {
+                activeMegaLaunchForce = scalar;
+            }
+            return true;
+        }
+        if (key == RuleMegaFoodLeaderKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 0f, 100f, out scalar))
+            {
+                activeMegaFoodLeaderChance = scalar;
+            }
+            return true;
+        }
+        if (key == RuleMegaFoodMiddleKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 0f, 100f, out scalar))
+            {
+                activeMegaFoodMiddleChance = scalar;
+            }
+            return true;
+        }
+        if (key == RuleMegaFoodNearLastKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 0f, 100f, out scalar))
+            {
+                activeMegaFoodNearLastChance = scalar;
+            }
+            return true;
+        }
+        if (key == RuleMegaFoodLastKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 0f, 100f, out scalar))
+            {
+                activeMegaFoodLastChance = scalar;
+            }
+            return true;
+        }
+        if (key == RuleMegaFoodFarBehindKey)
+        {
+            if (TryConvertRuleFloat(key, boxed, 0f, 100f, out scalar))
+            {
+                activeMegaFoodFarBehindChance = scalar;
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryConvertRuleFloat(
+        string key,
+        object boxed,
+        float minimum,
+        float maximum,
+        out float value)
+    {
+        value = 0f;
+        if (boxed == null)
+        {
+            return false;
+        }
+
+        try
+        {
+            value = Mathf.Clamp(Convert.ToSingle(boxed), minimum, maximum);
+            return true;
+        }
+        catch (Exception)
+        {
+            Plugin.Log.LogWarning($"Ignored malformed PVP ability rule '{key}'.");
+            return false;
         }
     }
 
@@ -1587,6 +2011,12 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private static string MegaLaunchFoodKey(int viewId) =>
         MegaLaunchFoodKeyPrefix + viewId;
 
+    private static string RuleAbilityWeightKey(CampfireAbility ability) =>
+        RuleAbilityWeightPrefix + (int)ability;
+
+    private static string RuleChaosWeightKey(ChaosEffect effect) =>
+        RuleChaosWeightPrefix + (int)effect;
+
     private static double NetworkTime => PhotonNetwork.InRoom
         ? PhotonNetwork.Time
         : Time.unscaledTime;
@@ -1608,7 +2038,15 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     public override void OnJoinedRoom()
     {
         ClearRunState(clearRoomProperties: false);
-        ApplyRoomProperties(PhotonNetwork.CurrentRoom?.CustomProperties);
+        if (PhotonNetwork.IsMasterClient
+            && SceneManager.GetActiveScene().name == "Airport")
+        {
+            PublishLocalPvpRules();
+        }
+        else
+        {
+            ApplyRoomProperties(PhotonNetwork.CurrentRoom?.CustomProperties);
+        }
     }
 
     public override void OnRoomPropertiesUpdate(Hashtable propertiesThatChanged)
@@ -1619,11 +2057,27 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     public override void OnLeftRoom()
     {
         ClearRunState(clearRoomProperties: false);
+        LoadActivePvpRulesFromLocalConfig();
+    }
+
+    public override void OnMasterClientSwitched(Photon.Realtime.Player newMasterClient)
+    {
+        if (!initialized || !PhotonNetwork.IsMasterClient)
+        {
+            return;
+        }
+
+        ApplyRoomProperties(PhotonNetwork.CurrentRoom?.CustomProperties);
+        StoreActivePvpRulesInLocalConfig();
     }
 
     private void OnDestroy()
     {
         SceneManager.sceneLoaded -= OnSceneLoaded;
+        if (initialized)
+        {
+            SetPvpConfigSubscriptions(subscribe: false);
+        }
         if (Instance == this)
         {
             Instance = null;

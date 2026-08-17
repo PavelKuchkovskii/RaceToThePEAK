@@ -29,6 +29,15 @@ internal enum ChaosEffect
     MiddleCampfire = 6
 }
 
+internal enum MegaLaunchFoodChanceTier
+{
+    Leader = 0,
+    Middle = 1,
+    NearLast = 2,
+    Last = 3,
+    FarBehind = 4
+}
+
 internal static class CampfireAbilityInfo
 {
     internal static string GetName(CampfireAbility ability)

@@ -7,6 +7,7 @@
 * Added hidden Mega Launch food to ordinary non-critical luggage food. Position-based chances are configurable from leader through far-behind, and the item remains visually indistinguishable until consumed.
 * Added synchronized ability HUD feedback, timed status effects, shield consumption, Mega Launch cooldown/countdown and short unconscious protection around launches.
 * Removed PVP next-campfire death respawning because it would bypass the dead racer's mandatory personal activation; legacy/configured values migrate to previous-campfire respawning.
+* Added all gameplay-affecting PVP ability, Chaos, Mega Launch and hidden-food tuning to the host lobby panel. The section exists only while PVP is selected, synchronizes through room properties and remains stable across host migration.
 
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.
