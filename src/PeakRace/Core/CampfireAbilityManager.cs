@@ -1472,19 +1472,28 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
 
     private static bool IsOrdinaryFood(Item item)
     {
-        if (item == null
-            || item.GetComponent<Action_Consume>() == null
-            || item.itemTags.HasFlag(Item.ItemTags.Mystical)
-            || (item.itemTags & (Item.ItemTags.PackagedFood
-                | Item.ItemTags.Berry
-                | Item.ItemTags.Mushroom)) == Item.ItemTags.None)
+        if (item == null || item.itemTags.HasFlag(Item.ItemTags.Mystical))
         {
             return false;
         }
 
+        Action_ModifyStatus[] statusActions =
+            item.GetComponents<Action_ModifyStatus>();
+        bool restoresHunger = item.GetComponent<Action_RestoreHunger>() != null
+            || statusActions.Any(effect =>
+                effect.statusType == CharacterAfflictions.STATUSTYPE.Hunger
+                && effect.changeAmount < 0f);
+        if (!restoresHunger)
+        {
+            return false;
+        }
+
+        // PEAK 2.0 does not tag every ordinary food consistently (Scout
+        // Cookies are one example), so eligibility follows the actual item
+        // actions instead of a hard-coded PackagedFood/Berry/Mushroom list.
         // Keep rare emergency healing items deterministic. Hunger restoration
         // and harmful side effects still qualify as ordinary food behavior.
-        return !item.GetComponents<Action_ModifyStatus>().Any(effect =>
+        return !statusActions.Any(effect =>
             effect.changeAmount < 0f
             && effect.statusType != CharacterAfflictions.STATUSTYPE.Hunger);
     }
