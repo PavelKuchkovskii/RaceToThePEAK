@@ -1413,6 +1413,11 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         StartMegaLaunchCountdown(consumer, requiresAbility: false);
     }
 
+    internal bool IsHiddenMegaLaunchFood(int itemViewId)
+    {
+        return itemViewId > 0 && megaLaunchFoodViewIds.Contains(itemViewId);
+    }
+
     internal void ForgetHiddenMegaLaunchFood(Item item)
     {
         PhotonView itemView = item != null ? item.GetComponent<PhotonView>() : null;
@@ -1421,6 +1426,9 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             && megaLaunchFoodViewIds.Remove(itemView.ViewID))
         {
             SetRoomProperty(MegaLaunchFoodKey(itemView.ViewID), null);
+            Plugin.Log.LogInfo(
+                $"Removed hidden Mega Launch food {itemView.ViewID} "
+                + "because its item object was destroyed.");
         }
     }
 

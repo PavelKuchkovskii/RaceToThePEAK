@@ -2,12 +2,16 @@ using HarmonyLib;
 using PeakRace.Core;
 using Photon.Pun;
 using System.Collections.Generic;
+using System.Reflection;
 
 namespace PeakRace.Patch;
 
 /// <summary>Feeds authoritative luggage opens and their spawned loot to the refresh manager.</summary>
 internal static class PvpChestRefreshPatch
 {
+    private static readonly FieldInfo ItemActionItemField =
+        AccessTools.Field(typeof(ItemActionBase), "item");
+
     internal static void Apply(Harmony harmony)
     {
         harmony.Patch(
@@ -35,6 +39,11 @@ internal static class PvpChestRefreshPatch
             prefix: new HarmonyMethod(
                 typeof(PvpChestRefreshPatch),
                 nameof(BeforeReduceUsesAction)));
+        harmony.Patch(
+            AccessTools.Method(typeof(Action_RestoreHunger), nameof(Action_RestoreHunger.RunAction)),
+            prefix: new HarmonyMethod(
+                typeof(PvpChestRefreshPatch),
+                nameof(BeforeRestoreHungerAction)));
         harmony.Patch(
             AccessTools.Method(typeof(Item), "OnDestroy"),
             prefix: new HarmonyMethod(
@@ -89,9 +98,25 @@ internal static class PvpChestRefreshPatch
         RequestFromItemAction(__instance);
     }
 
+    // This is the semantic food-effect path and remains a fallback if a PEAK
+    // prefab does not use the usual ReduceUses action.
+    private static void BeforeRestoreHungerAction(Action_RestoreHunger __instance)
+    {
+        RequestFromItemAction(__instance);
+    }
+
     private static void RequestFromItemAction(ItemActionBase action)
     {
-        Item item = action != null ? action.GetComponent<Item>() : null;
+        if (action == null)
+        {
+            return;
+        }
+
+        // PEAK initializes this protected reference from the owning Item even
+        // when action components live on child GameObjects. GetComponent on
+        // the action object silently missed those prefabs.
+        Item item = ItemActionItemField?.GetValue(action) as Item
+            ?? action.GetComponentInParent<Item>();
         RequestHiddenMegaLaunchFoodConsumption(item, item?.holderCharacter);
     }
 
@@ -111,6 +136,14 @@ internal static class PvpChestRefreshPatch
         if (itemView == null || itemView.ViewID <= 0)
         {
             return;
+        }
+
+        if (CampfireAbilityManager.Instance?.IsHiddenMegaLaunchFood(
+                itemView.ViewID) == true)
+        {
+            Plugin.Log.LogInfo(
+                $"Detected hidden Mega Launch food use {itemView.ViewID} "
+                + $"({item.GetName()}).");
         }
 
         consumer.GetComponent<CampfireAbilityState>()

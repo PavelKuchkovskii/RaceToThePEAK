@@ -19,6 +19,7 @@
 * Fixed Mega Launch for PEAK 2.0: its setting now represents target travel distance in metres. It uses the owner's camera direction, enters the game's cannon-style ragdoll state and assigns every owned body a gravity-compensated ballistic velocity instead of using PEAK's force buffer, which discards the requested force mode. Terrain and collisions can still shorten the flight.
 * Fixed hidden Mega Launch food consumption on PEAK 2.0 by detecting the completed food use through `Action_ReduceUses`, including food exhausted in one use, before the delayed item-removal path. Guest consumption now uses an owner-authenticated request that the host validates against the marked item and its current holder.
 * Hidden Mega Launch food eligibility now follows the item's actual hunger-restoration actions instead of PEAK's incomplete food tags, allowing ordinary items such as Scout Cookies while still excluding mystical and emergency-healing items.
+* Fixed hidden food action resolution for PEAK prefabs whose `ItemActionBase` components live on child objects: consumption now resolves the protected owning-item reference and also observes the semantic hunger-restoration action, with lifecycle diagnostics for marked items.
 
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.
