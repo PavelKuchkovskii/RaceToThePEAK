@@ -1,6 +1,7 @@
 using HarmonyLib;
 using PeakRace.Core;
 using Photon.Pun;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 
@@ -25,6 +26,11 @@ internal static class PvpChestRefreshPatch
                 typeof(PvpChestRefreshPatch),
                 nameof(AfterItemsSpawned)));
         harmony.Patch(
+            AccessTools.Method(typeof(Player), nameof(Player.AddItem)),
+            postfix: new HarmonyMethod(
+                typeof(PvpChestRefreshPatch),
+                nameof(AfterItemAdded)));
+        harmony.Patch(
             AccessTools.Method(typeof(Item), nameof(Item.Consume)),
             prefix: new HarmonyMethod(
                 typeof(PvpChestRefreshPatch),
@@ -44,11 +50,6 @@ internal static class PvpChestRefreshPatch
             prefix: new HarmonyMethod(
                 typeof(PvpChestRefreshPatch),
                 nameof(BeforeRestoreHungerAction)));
-        harmony.Patch(
-            AccessTools.Method(typeof(Item), "OnDestroy"),
-            prefix: new HarmonyMethod(
-                typeof(PvpChestRefreshPatch),
-                nameof(BeforeItemDestroyed)));
     }
 
     private static void AfterLuggageOpened(Luggage __instance, bool spawnItems)
@@ -69,6 +70,19 @@ internal static class PvpChestRefreshPatch
             CampfireAbilityManager.Instance?.RecordHiddenMegaLaunchFood(
                 luggage,
                 __result);
+        }
+    }
+
+    private static void AfterItemAdded(
+        Player __instance,
+        ItemInstanceData instanceData,
+        bool __result)
+    {
+        if (__result)
+        {
+            CampfireAbilityManager.Instance?.RecordHiddenMegaLaunchFoodHolder(
+                instanceData,
+                __instance?.character);
         }
     }
 
@@ -132,26 +146,20 @@ internal static class PvpChestRefreshPatch
             return;
         }
 
-        PhotonView itemView = item.GetComponent<PhotonView>();
-        if (itemView == null || itemView.ViewID <= 0)
+        Guid instanceId = item.data?.guid ?? Guid.Empty;
+        if (instanceId == Guid.Empty)
         {
             return;
         }
 
-        if (CampfireAbilityManager.Instance?.IsHiddenMegaLaunchFood(
-                itemView.ViewID) == true)
+        if (CampfireAbilityManager.Instance?.IsHiddenMegaLaunchFood(item) == true)
         {
             Plugin.Log.LogInfo(
-                $"Detected hidden Mega Launch food use {itemView.ViewID} "
+                $"Detected hidden Mega Launch food use {instanceId:N} "
                 + $"({item.GetName()}).");
         }
 
         consumer.GetComponent<CampfireAbilityState>()
-            ?.RequestHiddenMegaLaunchFoodConsumption(itemView.ViewID);
-    }
-
-    private static void BeforeItemDestroyed(Item __instance)
-    {
-        CampfireAbilityManager.Instance?.ForgetHiddenMegaLaunchFood(__instance);
+            ?.RequestHiddenMegaLaunchFoodConsumption(instanceId);
     }
 }

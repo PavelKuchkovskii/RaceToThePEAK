@@ -104,11 +104,11 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         photonView.RPC(nameof(RPCA_RequestSecondWind), RpcTarget.MasterClient);
     }
 
-    internal void RequestHiddenMegaLaunchFoodConsumption(int itemViewId)
+    internal void RequestHiddenMegaLaunchFoodConsumption(Guid instanceId)
     {
         if (character == null
             || !photonView.IsMine
-            || itemViewId <= 0)
+            || instanceId == Guid.Empty)
         {
             return;
         }
@@ -116,14 +116,14 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
         if (!PhotonNetwork.InRoom || PhotonNetwork.IsMasterClient)
         {
             CampfireAbilityManager.Instance
-                ?.HandleHiddenMegaLaunchFoodConsumed(itemViewId, character);
+                ?.HandleHiddenMegaLaunchFoodConsumed(instanceId, character);
             return;
         }
 
         photonView.RPC(
             nameof(RPCA_RequestHiddenMegaLaunchFoodConsumption),
             RpcTarget.MasterClient,
-            itemViewId);
+            instanceId.ToString("N"));
     }
 
     internal void SendAdrenaline()
@@ -647,7 +647,7 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
 
     [PunRPC]
     private void RPCA_RequestHiddenMegaLaunchFoodConsumption(
-        int itemViewId,
+        string instanceIdText,
         PhotonMessageInfo messageInfo)
     {
         if (!IsOwnerRequest(messageInfo))
@@ -657,8 +657,15 @@ internal sealed class CampfireAbilityState : MonoBehaviourPunCallbacks
             return;
         }
 
+        if (!Guid.TryParseExact(instanceIdText, "N", out Guid instanceId))
+        {
+            Plugin.Log.LogWarning(
+                "Rejected a malformed hidden Mega Launch food identifier.");
+            return;
+        }
+
         CampfireAbilityManager.Instance
-            ?.HandleHiddenMegaLaunchFoodConsumed(itemViewId, character);
+            ?.HandleHiddenMegaLaunchFoodConsumed(instanceId, character);
     }
 
     private bool IsOwnerRequest(PhotonMessageInfo messageInfo)

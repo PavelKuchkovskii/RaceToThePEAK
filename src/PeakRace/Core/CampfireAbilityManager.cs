@@ -24,7 +24,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private const string ExhaustUntilKeyPrefix = "RTP.ExhaustUntil.";
     private const string GhostRunnerUntilKeyPrefix = "RTP.GhostRunnerUntil.";
     private const string MegaCooldownUntilKeyPrefix = "RTP.MegaCooldownUntil.";
-    private const string MegaLaunchFoodKeyPrefix = "RTP.MegaFood.";
+    private const string MegaLaunchFoodInstanceKeyPrefix = "RTP.MegaFoodInstance.";
+    private const string LegacyMegaLaunchFoodKeyPrefix = "RTP.MegaFood.";
     private const string RuleAbilityWeightPrefix = "RTP.PvpRule.AbilityWeight.";
     private const string RuleChaosWeightPrefix = "RTP.PvpRule.ChaosWeight.";
     private const string RuleMegaCooldownKey = "RTP.PvpRule.MegaCooldown";
@@ -50,7 +51,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private readonly Dictionary<int, double> secondWindImmunityUntil = new();
     private readonly Dictionary<int, double> megaLaunchImmunityUntil = new();
     private readonly Dictionary<int, PendingMegaLaunch> pendingMegaLaunches = new();
-    private readonly HashSet<int> megaLaunchFoodViewIds = new();
+    private readonly HashSet<Guid> megaLaunchFoodInstanceIds = new();
+    private readonly Dictionary<Guid, int> megaLaunchFoodHolderActors = new();
     private readonly Dictionary<int, float> catchUpMultipliers = new();
     private readonly Dictionary<int, Vector3> lastSafePositions = new();
     private readonly Dictionary<CampfireAbility, ConfigEntry<float>> abilityWeights = new();
@@ -1363,73 +1365,94 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         {
             Item item = view != null ? view.GetComponent<Item>() : null;
             if (!IsOrdinaryFood(item)
+                || !TryGetOrCreateItemInstanceId(item, out Guid instanceId)
                 || UnityEngine.Random.Range(0f, 100f) >= chancePercent)
             {
                 continue;
             }
 
-            if (SetRoomProperty(MegaLaunchFoodKey(view.ViewID), true))
+            if (SetRoomProperty(MegaLaunchFoodKey(instanceId), 0))
             {
-                megaLaunchFoodViewIds.Add(view.ViewID);
+                megaLaunchFoodInstanceIds.Add(instanceId);
                 Plugin.Log.LogInfo(
-                    $"Marked hidden Mega Launch food {view.ViewID} "
-                    + $"({item.GetName()}) for "
+                    $"Marked hidden Mega Launch food {instanceId:N} "
+                    + $"(world view {view.ViewID}, {item.GetName()}) for "
                     + $"{opener.characterName} at {chancePercent:0.#}% odds.");
             }
         }
     }
 
     internal void HandleHiddenMegaLaunchFoodConsumed(
-        int itemViewId,
+        Guid instanceId,
         Character consumer)
     {
         if (!IsAuthority
-            || itemViewId <= 0
-            || !megaLaunchFoodViewIds.Contains(itemViewId))
+            || instanceId == Guid.Empty
+            || !megaLaunchFoodInstanceIds.Contains(instanceId))
         {
             return;
         }
 
-        PhotonView itemView = PhotonNetwork.GetPhotonView(itemViewId);
-        Item item = itemView != null ? itemView.GetComponent<Item>() : null;
+        int consumerActor = GetActorNumber(consumer);
+        bool holderRecorded = megaLaunchFoodHolderActors.TryGetValue(
+            instanceId,
+            out int holderActor);
+        Item currentItem = consumer?.data?.currentItem;
+        bool currentItemMatches = TryGetItemInstanceId(
+            currentItem,
+            out Guid currentInstanceId)
+            && currentInstanceId == instanceId;
         if (!IsActivePlayerCharacter(consumer)
             || consumer.data == null
             || consumer.data.dead
-            || item == null
-            || (item.holderCharacter != consumer
-                && item.trueHolderCharacter != consumer))
+            || consumerActor <= 0
+            || (holderRecorded && holderActor != consumerActor)
+            || (!holderRecorded && !currentItemMatches))
         {
             Plugin.Log.LogWarning(
-                $"Rejected hidden Mega Launch food {itemViewId}: "
+                $"Rejected hidden Mega Launch food {instanceId:N}: "
                 + "the requesting player is not its current holder.");
             return;
         }
 
-        megaLaunchFoodViewIds.Remove(itemViewId);
-        SetRoomProperty(MegaLaunchFoodKey(itemViewId), null);
+        megaLaunchFoodInstanceIds.Remove(instanceId);
+        megaLaunchFoodHolderActors.Remove(instanceId);
+        SetRoomProperty(MegaLaunchFoodKey(instanceId), null);
         Plugin.Log.LogInfo(
-            $"Consumed hidden Mega Launch food {itemViewId} "
-            + $"({item.GetName()}) by {consumer.characterName}.");
+            $"Consumed hidden Mega Launch food {instanceId:N} "
+            + $"by {consumer.characterName}.");
         StartMegaLaunchCountdown(consumer, requiresAbility: false);
     }
 
-    internal bool IsHiddenMegaLaunchFood(int itemViewId)
+    internal void RecordHiddenMegaLaunchFoodHolder(
+        ItemInstanceData itemData,
+        Character holder)
     {
-        return itemViewId > 0 && megaLaunchFoodViewIds.Contains(itemViewId);
+        if (!IsAuthority
+            || itemData == null
+            || itemData.guid == Guid.Empty
+            || !megaLaunchFoodInstanceIds.Contains(itemData.guid))
+        {
+            return;
+        }
+
+        int holderActor = GetActorNumber(holder);
+        if (holderActor <= 0
+            || !SetRoomProperty(MegaLaunchFoodKey(itemData.guid), holderActor))
+        {
+            return;
+        }
+
+        megaLaunchFoodHolderActors[itemData.guid] = holderActor;
+        Plugin.Log.LogInfo(
+            $"Transferred hidden Mega Launch food {itemData.guid:N} "
+            + $"to {holder.characterName} inventory.");
     }
 
-    internal void ForgetHiddenMegaLaunchFood(Item item)
+    internal bool IsHiddenMegaLaunchFood(Item item)
     {
-        PhotonView itemView = item != null ? item.GetComponent<PhotonView>() : null;
-        if (IsAuthority
-            && itemView != null
-            && megaLaunchFoodViewIds.Remove(itemView.ViewID))
-        {
-            SetRoomProperty(MegaLaunchFoodKey(itemView.ViewID), null);
-            Plugin.Log.LogInfo(
-                $"Removed hidden Mega Launch food {itemView.ViewID} "
-                + "because its item object was destroyed.");
-        }
+        return TryGetItemInstanceId(item, out Guid instanceId)
+            && megaLaunchFoodInstanceIds.Contains(instanceId);
     }
 
     private void StartMegaLaunchCountdown(Character character, bool requiresAbility)
@@ -1476,6 +1499,43 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         return fieldPosition >= 0.75f
             ? activeMegaFoodNearLastChance
             : activeMegaFoodMiddleChance;
+    }
+
+    private static bool TryGetOrCreateItemInstanceId(
+        Item item,
+        out Guid instanceId)
+    {
+        instanceId = Guid.Empty;
+        if (item == null)
+        {
+            return false;
+        }
+
+        bool createdIdentity = false;
+        if (item.data == null)
+        {
+            item.data = new ItemInstanceData(Guid.NewGuid());
+            createdIdentity = true;
+        }
+        else if (item.data.guid == Guid.Empty)
+        {
+            item.data.guid = Guid.NewGuid();
+            createdIdentity = true;
+        }
+
+        if (createdIdentity)
+        {
+            ItemInstanceDataHandler.AddInstanceData(item.data);
+        }
+
+        instanceId = item.data.guid;
+        return instanceId != Guid.Empty;
+    }
+
+    private static bool TryGetItemInstanceId(Item item, out Guid instanceId)
+    {
+        instanceId = item?.data?.guid ?? Guid.Empty;
+        return instanceId != Guid.Empty;
     }
 
     private static bool IsOrdinaryFood(Item item)
@@ -2013,12 +2073,15 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     megaCooldownUntil,
                     "Mega Launch cooldown");
             }
-            else if (TryParseSuffix(key, MegaLaunchFoodKeyPrefix, out int foodViewId))
+            else if (TryParseGuidSuffix(
+                key,
+                MegaLaunchFoodInstanceKeyPrefix,
+                out Guid foodInstanceId))
             {
-                bool enabled = false;
+                int holderActor = 0;
                 try
                 {
-                    enabled = boxed != null && Convert.ToBoolean(boxed);
+                    holderActor = boxed != null ? Convert.ToInt32(boxed) : 0;
                 }
                 catch (Exception)
                 {
@@ -2026,13 +2089,22 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                         $"Ignored malformed hidden Mega Launch food '{key}'.");
                 }
 
-                if (enabled)
+                if (boxed != null)
                 {
-                    megaLaunchFoodViewIds.Add(foodViewId);
+                    megaLaunchFoodInstanceIds.Add(foodInstanceId);
+                    if (holderActor > 0)
+                    {
+                        megaLaunchFoodHolderActors[foodInstanceId] = holderActor;
+                    }
+                    else
+                    {
+                        megaLaunchFoodHolderActors.Remove(foodInstanceId);
+                    }
                 }
                 else
                 {
-                    megaLaunchFoodViewIds.Remove(foodViewId);
+                    megaLaunchFoodInstanceIds.Remove(foodInstanceId);
+                    megaLaunchFoodHolderActors.Remove(foodInstanceId);
                 }
             }
         }
@@ -2181,6 +2253,20 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
             && value >= 0;
     }
 
+    private static bool TryParseGuidSuffix(
+        string key,
+        string prefix,
+        out Guid value)
+    {
+        value = Guid.Empty;
+        return key.StartsWith(prefix, StringComparison.Ordinal)
+            && Guid.TryParseExact(
+                key.Substring(prefix.Length),
+                "N",
+                out value)
+            && value != Guid.Empty;
+    }
+
     private void ClearRunState(bool clearRoomProperties)
     {
         abilities.Clear();
@@ -2193,7 +2279,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
         secondWindImmunityUntil.Clear();
         megaLaunchImmunityUntil.Clear();
         pendingMegaLaunches.Clear();
-        megaLaunchFoodViewIds.Clear();
+        megaLaunchFoodInstanceIds.Clear();
+        megaLaunchFoodHolderActors.Clear();
         catchUpMultipliers.Clear();
         lastSafePositions.Clear();
         nextCatchUpRefreshTime = 0f;
@@ -2221,7 +2308,12 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
                     || key.StartsWith(ExhaustUntilKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(GhostRunnerUntilKeyPrefix, StringComparison.Ordinal)
                     || key.StartsWith(MegaCooldownUntilKeyPrefix, StringComparison.Ordinal)
-                    || key.StartsWith(MegaLaunchFoodKeyPrefix, StringComparison.Ordinal)))
+                    || key.StartsWith(
+                        MegaLaunchFoodInstanceKeyPrefix,
+                        StringComparison.Ordinal)
+                    || key.StartsWith(
+                        LegacyMegaLaunchFoodKeyPrefix,
+                        StringComparison.Ordinal)))
             {
                 removals[key] = null;
             }
@@ -2276,8 +2368,8 @@ internal sealed class CampfireAbilityManager : MonoBehaviourPunCallbacks
     private static string MegaCooldownUntilKey(int actorNumber) =>
         MegaCooldownUntilKeyPrefix + actorNumber;
 
-    private static string MegaLaunchFoodKey(int viewId) =>
-        MegaLaunchFoodKeyPrefix + viewId;
+    private static string MegaLaunchFoodKey(Guid instanceId) =>
+        MegaLaunchFoodInstanceKeyPrefix + instanceId.ToString("N");
 
     private static string RuleAbilityWeightKey(CampfireAbility ability) =>
         RuleAbilityWeightPrefix + (int)ability;
