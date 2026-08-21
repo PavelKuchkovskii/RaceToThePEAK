@@ -18,6 +18,7 @@ through climbing prowess, or resort to sabotage to be the fastest up the PEAK.
 - Old biomes and camp roots remain available while a player, unfinished team, corpse timer or valid respawn target still needs them, then unload as one safe contiguous range.
 - Sun, sky, storms and Gloom visuals follow each client's observed racer, so unlocking a later biome does not obscure earlier racers' routes.
 - Final rising lava or Gloom uses a per-player clock when waiting for nobody, a shared per-team clock when waiting for teams, and PEAK's vanilla global clock when waiting for the lobby.
+- Outside lobby waiting, the global OrbFog follows the slowest active racer instead of the first racer who loads the next biome, preventing retained earlier routes from being engulfed during a transition.
 - Previous-campfire respawns use the checkpoint legitimately completed by the active player/team/lobby progression scope, never another team's later global map progress.
 - Four host-configurable respawn modes, available from the Airport with **F3** by default.
 - Respawn statues always give items instead of reviving players.

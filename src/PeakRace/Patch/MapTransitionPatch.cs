@@ -1,9 +1,11 @@
 using HarmonyLib;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 using Peak;
+using PeakRace.Core;
 using UnityEngine;
 
 namespace PeakRace.Patch;
@@ -68,6 +70,50 @@ internal static class MapTransitionPatch
             typeof(MapHandler.MapSegment),
             nameof(MapHandler.MapSegment.segmentParent));
 
+        MethodInfo waitForFogCatchUp = AccessTools.Method(
+            typeof(OrbFogHandler),
+            nameof(OrbFogHandler.WaitForFogCatchUp));
+        MethodInfo waitForReveal = AccessTools.Method(
+            typeof(OrbFogHandler),
+            nameof(OrbFogHandler.WaitForReveal));
+        MethodInfo setFogOrigin = AccessTools.Method(
+            typeof(OrbFogHandler),
+            nameof(OrbFogHandler.SetFogOrigin));
+        MethodInfo waitForFogCatchUpByPolicy = AccessTools.Method(
+            typeof(MapTransitionPatch),
+            nameof(WaitForFogCatchUpByPolicy));
+        MethodInfo waitForRevealByPolicy = AccessTools.Method(
+            typeof(MapTransitionPatch),
+            nameof(WaitForRevealByPolicy));
+        MethodInfo setFogOriginByPolicy = AccessTools.Method(
+            typeof(MapTransitionPatch),
+            nameof(SetFogOriginByPolicy));
+
+        int catchUpReplacements = 0;
+        int revealReplacements = 0;
+        int originReplacements = 0;
+        foreach (CodeInstruction code in codes)
+        {
+            if (code.Calls(waitForFogCatchUp))
+            {
+                code.opcode = OpCodes.Call;
+                code.operand = waitForFogCatchUpByPolicy;
+                catchUpReplacements++;
+            }
+            else if (code.Calls(waitForReveal))
+            {
+                code.opcode = OpCodes.Call;
+                code.operand = waitForRevealByPolicy;
+                revealReplacements++;
+            }
+            else if (code.Calls(setFogOrigin))
+            {
+                code.opcode = OpCodes.Call;
+                code.operand = setFogOriginByPolicy;
+                originReplacements++;
+            }
+        }
+
         bool patched = false;
         for (int index = 1; index < codes.Count; index++)
         {
@@ -107,7 +153,49 @@ internal static class MapTransitionPatch
             Plugin.Log.LogError("Could not patch the previous-biome deactivation call.");
         }
 
+        if (catchUpReplacements == 1
+            && revealReplacements == 1
+            && originReplacements == 1)
+        {
+            Plugin.Log.LogInfo(
+                "Map transitions now defer OrbFog to the scoped progression policy.");
+        }
+        else
+        {
+            Plugin.Log.LogError(
+                "Could not fully patch map-transition OrbFog calls: "
+                + $"catch-up={catchUpReplacements}, reveal={revealReplacements}, "
+                + $"origin={originReplacements}.");
+        }
+
         return codes;
+    }
+
+    private static IEnumerator WaitForFogCatchUpByPolicy(OrbFogHandler fog)
+    {
+        return OrbFogProgressionController.ManagesCurrentTransition
+            ? EmptyRoutine()
+            : fog.WaitForFogCatchUp();
+    }
+
+    private static IEnumerator WaitForRevealByPolicy(OrbFogHandler fog)
+    {
+        return OrbFogProgressionController.ManagesCurrentTransition
+            ? EmptyRoutine()
+            : fog.WaitForReveal();
+    }
+
+    private static void SetFogOriginByPolicy(OrbFogHandler fog, int originId)
+    {
+        if (!OrbFogProgressionController.ManagesCurrentTransition)
+        {
+            fog.SetFogOrigin(originId);
+        }
+    }
+
+    private static IEnumerator EmptyRoutine()
+    {
+        yield break;
     }
 
 }

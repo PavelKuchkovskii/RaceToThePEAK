@@ -21,6 +21,7 @@
 * Hidden Mega Launch food eligibility now follows the item's actual hunger-restoration actions instead of PEAK's incomplete food tags, allowing ordinary items such as Scout Cookies while still excluding mystical and emergency-healing items.
 * Fixed hidden food action resolution for PEAK prefabs whose `ItemActionBase` components live on child objects: consumption now resolves the protected owning-item reference and also observes the semantic hunger-restoration action, with lifecycle diagnostics for marked items.
 * Made hidden Mega Launch food survive pickup: tracking now follows the stable item-instance GUID into the inventory instead of the world `PhotonView` that PEAK destroys during pickup, while the host records and validates the new holder.
+* Decoupled PEAK's global OrbFog from early biome loading in PVP, nobody-wait and team-wait races. The host now advances a synchronized fog origin only after the slowest active racer physically enters the next segment, while lobby waiting retains vanilla behavior.
 
 ### 0.9.0
 * Added three synchronized campfire waiting policies for every race mode: wait for nobody, wait for each team independently, or wait for the whole lobby.

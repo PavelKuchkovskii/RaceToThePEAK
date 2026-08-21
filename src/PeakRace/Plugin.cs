@@ -56,6 +56,7 @@ public partial class Plugin : BaseUnityPlugin
         systemsObject.AddComponent<PlayerCampfireProgressTracker>();
         systemsObject.AddComponent<RaceRespawnController>();
         systemsObject.AddComponent<BiomeLifecycleController>();
+        systemsObject.AddComponent<OrbFogProgressionController>();
         systemsObject.AddComponent<PvpBlowgunManager>();
         systemsObject.AddComponent<PvpChestRefreshManager>();
         systemsObject.AddComponent<LocalBiomeEnvironmentController>();
